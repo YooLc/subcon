@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use tracing::warn;
 
 #[derive(Debug, Deserialize)]
 struct RulesetsToml {
@@ -98,9 +99,17 @@ pub fn load_rules(
 
     let mut rules = Vec::new();
 
+    let mut final_groups: Vec<String> = Vec::new();
+
     for ruleset in parsed.rulesets {
         let group = ruleset.group;
-        let source = RuleSource::parse(ruleset.ruleset.trim(), rules_base_dir);
+        let ruleset_trimmed = ruleset.ruleset.trim();
+        if ruleset_trimmed.eq_ignore_ascii_case("[]FINAL") {
+            final_groups.push(group);
+            continue;
+        }
+
+        let source = RuleSource::parse(ruleset_trimmed, rules_base_dir);
         match source {
             RuleSource::Inline(rule_text) => {
                 if let Some(rule) = parse_rule_line(&rule_text, &group)
@@ -133,11 +142,26 @@ pub fn load_rules(
         }
     }
 
+    for group in final_groups {
+        rules.push(Rule {
+            rule_type: RuleType::new("FINAL"),
+            content: None,
+            group,
+            flags: RuleFlags::default(),
+        });
+    }
+
     Ok(rules)
 }
 
 fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
-    let trimmed = line.trim();
+    let stripped = if let Some(idx) = line.find("//") {
+        &line[..idx]
+    } else {
+        line
+    };
+    let trimmed = stripped.trim_end();
+    let trimmed = trimmed.trim_start();
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return Ok(None);
     }
@@ -147,7 +171,12 @@ fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
         return Ok(None);
     }
 
-    let rule_type = RuleType::new(&parts[0]);
+    let raw_type = &parts[0];
+    if !is_supported_rule_type(raw_type) {
+        warn!(rule_type = %raw_type, "unsupported rule type skipped");
+        return Ok(None);
+    }
+    let rule_type = RuleType::new(raw_type);
     let content = parts
         .get(1)
         .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
@@ -175,6 +204,46 @@ fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
     }))
 }
 
+fn is_supported_rule_type(raw: &str) -> bool {
+    match raw.to_ascii_uppercase().as_str() {
+        "DOMAIN" |
+        "DOMAIN-SUFFIX" |
+        "DOMAIN-KEYWORD" |
+        "DOMAIN-WILDCARD" |
+        "DOMAIN-REGEX" |
+        "GEOSITE" |
+        "IP-CIDR" |
+        "IP-CIDR6" |
+        "IP-SUFFIX" |
+        "IP-ASN" |
+        "GEOIP" |
+        "SRC-GEOIP" |
+        "SRC-IP-ASN" |
+        "SRC-IP-CIDR" |
+        "SRC-IP-SUFFIX" |
+        "DST-PORT" |
+        "SRC-PORT" |
+        "IN-PORT" |
+        "IN-TYPE" |
+        "IN-USER" |
+        "IN-NAME" |
+        "PROCESS-PATH" |
+        "PROCESS-PATH-REGEX" |
+        "PROCESS-NAME" |
+        "PROCESS-NAME-REGEX" |
+        "UID" |
+        "NETWORK" |
+        "DSCP" |
+        "RULE-SET" |
+        "AND" |
+        "OR" |
+        "NOT" |
+        "SUB-RULE" |
+        "MATCH" => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,10 +260,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_rule_with_comment() {
+        let rule = parse_rule_line("DOMAIN-SUFFIX,example.com // comment here", "G")
+            .unwrap()
+            .unwrap();
+        assert_eq!(rule.rule_type.to_string(), "DOMAIN-SUFFIX");
+        assert_eq!(rule.content.as_deref(), Some("example.com"));
+        assert_eq!(rule.render(), "DOMAIN-SUFFIX,example.com,G");
+    }
+
+    #[test]
     fn parse_type_only_rule() {
-        let rule = parse_rule_line("FINAL", "Fallback").unwrap().unwrap();
-        assert_eq!(rule.rule_type.to_string(), "FINAL");
-        assert!(rule.content.is_none());
-        assert_eq!(rule.render(), "FINAL,Fallback");
+        let rule = parse_rule_line("FINAL", "Fallback").unwrap();
+        assert!(rule.is_none(), "unsupported rule type should be skipped");
     }
 }

@@ -1,0 +1,63 @@
+protocol: wireguard
+includes:
+  - common
+
+fields:
+  ip:
+    type: string
+  ipv6:
+    type: string
+  private-key:
+    type: string
+  public-key:
+    type: string
+  allowed-ips:
+    type: list
+  pre-shared-key:
+    type: string
+  reserved:
+    type: string
+  mtu:
+    type: integer
+  remote-dns-resolve:
+    type: boolean
+  dns:
+    type: list
+
+targets:
+  clash:
+    template:
+      ip:
+        from: ip
+      ipv6:
+        from: ipv6
+        optional: true
+      private-key:
+        from: private-key
+      public-key:
+        from: public-key
+      pre-shared-key:
+        from: pre-shared-key
+        optional: true
+      allowed-ips:
+        from: allowed-ips
+        optional: true
+      reserved:
+        from: reserved
+        optional: true
+      mtu:
+        from: mtu
+        optional: true
+      dns:
+        from: dns
+        optional: true
+  surge:
+    template:
+      dns-server:
+        from: dns
+        optional: true
+      self-ip:
+        from: ip
+      self-ipv6:
+        from: ipv6
+        optional: true

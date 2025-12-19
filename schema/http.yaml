@@ -1,4 +1,4 @@
-protocol: trojan
+protocol: http
 includes:
   - common
   - tls
@@ -6,13 +6,20 @@ includes:
 fields:
   password:
     type: string
+  username:
+    type: string
 
 targets:
   clash:
     template:
+      username:
+        from: username
       password:
         from: password
   surge:
+    type: "http"
     template:
+      username:
+        from: username
       password:
         from: password

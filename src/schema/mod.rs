@@ -338,6 +338,7 @@ pub struct SchemaRegistry {
     protocols: HashMap<String, ProtocolSchema>,
     modules: HashMap<String, Box<dyn ProtocolModule>>,
     exporters: HashMap<String, Box<dyn Exporter>>,
+    default_exporters: HashMap<String, Box<dyn Exporter>>,
     parsers: HashMap<String, Box<dyn Parser>>,
     prologues: Vec<Box<dyn RenderPass>>,
 }
@@ -352,6 +353,7 @@ impl SchemaRegistry {
             protocols,
             modules: HashMap::new(),
             exporters: HashMap::new(),
+            default_exporters: HashMap::new(),
             parsers: HashMap::new(),
             prologues: Vec::new(),
         })
@@ -360,7 +362,7 @@ impl SchemaRegistry {
     pub fn with_builtin(path: impl AsRef<Path>) -> Result<Self> {
         let mut registry = Self::load_from_dir(path)?;
         registry.register_builtin_modules();
-        registry.register_builtin_exporters();
+        registry.register_builtin_default_exporters();
         registry.register_builtin_parsers();
         registry.register_builtin_prologues();
         Ok(registry)
@@ -370,8 +372,14 @@ impl SchemaRegistry {
         self.modules.insert(module.protocol().to_string(), module);
     }
 
+    #[allow(dead_code)]
     pub fn register_exporter(&mut self, exporter: Box<dyn Exporter>) {
         self.exporters
+            .insert(exporter.target().to_string(), exporter);
+    }
+
+    pub fn register_default_exporter(&mut self, exporter: Box<dyn Exporter>) {
+        self.default_exporters
             .insert(exporter.target().to_string(), exporter);
     }
 
@@ -384,13 +392,18 @@ impl SchemaRegistry {
     }
 
     fn register_builtin_modules(&mut self) {
-        self.register_module(Box::new(trojan::TrojanModule));
-        self.register_module(Box::new(shadowsocks::ShadowsocksModule));
+        let available: Vec<String> = self.protocols.keys().cloned().collect();
+        if available.iter().any(|p| p == "trojan") {
+            self.register_module(Box::new(trojan::TrojanModule));
+        }
+        if available.iter().any(|p| p == "shadowsocks") {
+            self.register_module(Box::new(shadowsocks::ShadowsocksModule));
+        }
     }
 
-    fn register_builtin_exporters(&mut self) {
-        self.register_exporter(Box::new(crate::export::clash::ClashExporter));
-        self.register_exporter(Box::new(crate::export::surge::SurgeExporter));
+    fn register_builtin_default_exporters(&mut self) {
+        self.register_default_exporter(Box::new(crate::export::clash::ClashExporter));
+        self.register_default_exporter(Box::new(crate::export::surge::SurgeExporter));
     }
 
     fn register_builtin_parsers(&mut self) {
@@ -412,6 +425,10 @@ impl SchemaRegistry {
 
     fn exporter(&self, target: &str) -> Option<&dyn Exporter> {
         self.exporters.get(target).map(|e| e.as_ref())
+    }
+
+    fn default_exporter(&self, target: &str) -> Option<&dyn Exporter> {
+        self.default_exporters.get(target).map(|e| e.as_ref())
     }
 
     #[allow(dead_code)]
@@ -449,6 +466,8 @@ impl SchemaRegistry {
 
         if let Some(exporter) = self.exporter(target) {
             exporter.render(protocol, target_schema, &normalized, rendered)
+        } else if let Some(exporter) = self.default_exporter(target) {
+            exporter.render(protocol, target_schema, &normalized, rendered)
         } else {
             Ok(rendered)
         }
@@ -466,17 +485,24 @@ impl SchemaRegistry {
 fn load_protocol_files(dir: &Path) -> Result<HashMap<String, ProtocolSchema>> {
     let mut protocols = HashMap::new();
 
-    for entry in fs::read_dir(dir)
-        .with_context(|| format!("failed to read schema directory {}", dir.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
-            continue;
-        }
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        for entry in fs::read_dir(&current)
+            .with_context(|| format!("failed to read schema directory {}", current.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("yaml") {
+                continue;
+            }
 
-        let schema = ProtocolSchema::load_from_file(&path)?;
-        protocols.insert(schema.protocol.clone(), schema);
+            let schema = ProtocolSchema::load_from_file(&path)?;
+            protocols.insert(schema.protocol.clone(), schema);
+        }
     }
 
     if protocols.is_empty() {

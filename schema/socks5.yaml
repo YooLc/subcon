@@ -1,0 +1,29 @@
+protocol: socks5
+includes:
+  - common
+  - tls
+
+fields:
+  password:
+    type: string
+  username:
+    type: string
+
+targets:
+  clash:
+    template:
+      username:
+        from: username
+        optional: true
+      password:
+        from: password
+        optional: true
+  surge:
+    type: "http"
+    template:
+      username:
+        from: username
+        optional: true
+      password:
+        from: password
+        optional: true

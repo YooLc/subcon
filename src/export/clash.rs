@@ -32,11 +32,14 @@ pub fn render_proxy_group(group: &ProxyGroup) -> Value {
         "type".to_string(),
         Value::String(group.group_type.clone()),
     );
-    let proxies: Vec<Value> = group
+    let mut proxies: Vec<Value> = group
         .proxies
         .iter()
         .map(|p| Value::String(normalize_proxy_name(p)))
         .collect();
+    if proxies.is_empty() {
+        proxies.push(Value::String("DIRECT".to_string()));
+    }
     map.insert("proxies".to_string(), Value::Array(proxies));
 
     if let Some(url) = &group.url {

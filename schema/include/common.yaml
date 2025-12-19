@@ -85,7 +85,7 @@ targets:
         from: tfo
         optional: true
         default: false
-      underlying_proxy:
+      underlying-proxy:
         from: dialer-proxy
         optional: true
       smux:

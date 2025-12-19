@@ -14,6 +14,8 @@ pub struct Pref {
     #[serde(default)]
     pub rulesets: Vec<RulesetImport>,
     pub server: Server,
+    #[serde(default)]
+    pub node_pref: NodePref,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,9 +29,19 @@ pub struct Common {
     pub insert_url: Vec<String>,
     #[serde(default)]
     pub prepend_insert_url: bool,
+    #[serde(default)]
+    pub sort: bool,
+    pub schema: Option<String>,
     pub clash_rule_base: Option<String>,
-    #[allow(dead_code)]
     pub surge_rule_base: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct NodePref {
+    pub udp: Option<bool>,
+    pub tfo: Option<bool>,
+    #[serde(rename = "skip-cert-verify")]
+    pub skip_cert_verify: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
