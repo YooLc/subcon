@@ -1,0 +1,16 @@
+protocol: trojan
+includes:
+  - common
+  - tls
+
+fields:
+  password:
+    type: string
+
+targets:
+  clash:
+    template:
+      password:
+        from: password
+  surge:
+    template: {}

@@ -1,0 +1,59 @@
+protocol: shadowsocks
+includes:
+  - common
+  - tls
+
+fields:
+  cipher:
+    type: string
+  password:
+    type: string
+  plugin:
+    type: string
+  udp-over-tcp:
+    type: boolean
+  udp-over-tcp-version:
+    type: integer
+  plugin-opts:
+    type: map
+  smux:
+    type: map
+
+targets:
+  clash:
+    template:
+      type: ss
+      cipher:
+        from: cipher
+      password:
+        from: password
+      udp-over-tcp:
+        from: udp-over-tcp
+        optional: true
+        default: false
+      udp-over-tcp-version:
+        from: udp-over-tcp-version
+        optional: true
+        default: 1
+      plugin:
+        from: plugin
+        optional: true
+      plugin-opts:
+        from: plugin-opts
+        optional: true
+      smux:
+        from: smux
+        optional: true
+  surge:
+    template:
+      type: ss
+      cipher:
+        from: cipher
+      password:
+        from: password
+      plugin:
+        from: plugin
+        optional: true
+      plugin-opts:
+        from: plugin-opts
+        optional: true

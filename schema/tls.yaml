@@ -1,0 +1,73 @@
+protocol: tls
+
+fields:
+  tls:
+    type: boolean
+  sni:
+    type: string
+  fingerprint:
+    type: string
+  alpn:
+    type: list
+  skip-cert-verify:
+    type: boolean
+  certificate:
+    type: string
+  private-key:
+    type: string
+  client-fingerprint:
+    type: string
+  reality-opts:
+    type: map
+  ech-opts:
+    type: map
+
+targets:
+  clash:
+    template:
+      tls:
+        from: tls
+        optional: true
+        default: true
+      sni:
+        from: sni
+        optional: true
+      fingerprint:
+        from: fingerprint
+        optional: true
+      alpn:
+        from: alpn
+        optional: true
+        default: ["h2", "http/1.1"]
+      skip-cert-verify:
+        from: skip-cert-verify
+        optional: true
+        default: false
+      certificate:
+        from: certificate
+        optional: true
+      private-key:
+        from: private-key
+        optional: true
+      client-fingerprint:
+        from: client-fingerprint
+        optional: true
+      reality-opts:
+        from: reality-opts
+        optional: true
+      ech-opts:
+        from: ech-opts
+        optional: true
+  surge:
+    template:
+      tls:
+        from: tls
+        optional: true
+        default: true
+      skip-cert-verify:
+        from: skip-cert-verify
+        optional: true
+        default: false
+      sni:
+        from: sni
+        optional: true

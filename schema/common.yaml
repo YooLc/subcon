@@ -1,0 +1,97 @@
+protocol: common
+
+fields:
+  name:
+    type: string
+  server:
+    type: string
+  port:
+    type: integer
+  ip-version:
+    type: string
+    optional: true
+    default: dual
+  udp:
+    type: boolean
+    optional: true
+    default: false
+  interface-name:
+    type: string
+    optional: true
+  routing-mark:
+    type: integer
+    optional: true
+  tfo:
+    type: boolean
+    optional: true
+    default: false
+  mptcp:
+    type: boolean
+    optional: true
+    default: false
+  dialer-proxy:
+    type: string
+    optional: true
+  smux:
+    type: map
+    optional: true
+
+targets:
+  clash:
+    template:
+      name:
+        from: name
+      server:
+        from: server
+      port:
+        from: port
+      ip-version:
+        from: ip-version
+        optional: true
+        default: dual
+      udp:
+        from: udp
+        optional: true
+        default: false
+      interface-name:
+        from: interface-name
+        optional: true
+      routing-mark:
+        from: routing-mark
+        optional: true
+      tfo:
+        from: tfo
+        optional: true
+        default: false
+      mptcp:
+        from: mptcp
+        optional: true
+        default: false
+      dialer-proxy:
+        from: dialer-proxy
+        optional: true
+      smux:
+        from: smux
+        optional: true
+  surge:
+    template:
+      name:
+        from: name
+      server:
+        from: server
+      port:
+        from: port
+      tfo:
+        from: tfo
+        optional: true
+        default: false
+      underlying_proxy:
+        from: dialer-proxy
+        optional: true
+      smux:
+        from: smux
+        optional: true
+      udp-relay:
+        from: udp
+        optional: true
+        default: false

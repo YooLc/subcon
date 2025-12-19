@@ -1,0 +1,53 @@
+protocol: hysteria2
+includes:
+  - common
+  - tls
+
+fields:
+  password:
+    type: string
+  ports:
+    type: string
+  up:
+    type: string
+  down:
+    type: string
+  obfs:
+    type: string
+  obfs-password:
+    type: string
+
+targets:
+  clash:
+    template:
+      password:
+        from: password
+      ports:
+        from: ports
+        optional: true
+      up:
+        from: up
+        optional: true
+      down:
+        from: down
+        optional: true
+      obfs:
+        from: obfs
+        optional: true
+      obfs-password:
+        from: obfs-password
+        optional: true
+      alpn:
+        from: alpn
+        optional: true
+        default: ["h3"]
+  surge:
+    template:
+      password:
+        from: password
+      ports:
+        from: ports
+        optional: true
+      download-bandwidth:
+        from: down
+        optional: true
