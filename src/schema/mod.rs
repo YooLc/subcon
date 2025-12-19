@@ -7,6 +7,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use serde_json::{Map as JsonMap, Value};
+use serde_saphyr as serde_yaml;
 
 use crate::export::{Exporter, FieldPruner, RenderPass, TypeInjector};
 use crate::parser::Parser;

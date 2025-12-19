@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
+use serde_saphyr as serde_yaml;
 
 use super::Parser;
 
