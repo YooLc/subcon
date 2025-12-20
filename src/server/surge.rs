@@ -204,8 +204,25 @@ fn render_surge_wireguard_proxy_line(
     {
         peer_parts.push(format!("preshared-key = {psk}"));
     }
-    if let Some(allowed) = proxy.values.get("allowed-ips").and_then(|v| v.as_str()) {
-        peer_parts.push(format!("allowed-ips = \"{allowed}\""));
+    if let Some(allowed_value) = proxy.values.get("allowed-ips") {
+        let allowed = match allowed_value {
+            Value::String(s) => Some(s.to_string()),
+            Value::Array(arr) => {
+                let parts: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join(", "))
+                }
+            }
+            _ => None,
+        };
+        if let Some(allowed) = allowed {
+            peer_parts.push(format!("allowed-ips = \"{allowed}\""));
+        }
     }
 
     if !peer_parts.is_empty() {
