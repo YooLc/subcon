@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            deb: true
+          - target: aarch64-unknown-linux-gnu
+            deb: true
+          - target: mips-unknown-linux-gnu
+            deb: true
+          - target: x86_64-apple-darwin
+            deb: false
+          - target: aarch64-apple-darwin
+            deb: false
+          - target: x86_64-pc-windows-gnu
+            deb: false
+          - target: aarch64-pc-windows-gnullvm
+            deb: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.12.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Install macOS SDK
+        if: contains(matrix.target, 'apple-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_url="https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz"
+          curl -L "$sdk_url" -o macos-sdk.tar.xz
+          tar -xf macos-sdk.tar.xz
+          echo "SDKROOT=$PWD/MacOSX11.3.sdk" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
+
+      - name: Install deb tooling
+        if: matrix.deb
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
+
+      - name: Build
+        shell: bash
+        run: |
+          cargo zigbuild --release --target ${{ matrix.target }}
+
+      - name: Package tar.gz
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin_name="subcon"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            bin_name="subcon.exe"
+          fi
+          dist_dir="dist"
+          mkdir -p "$dist_dir"
+          tar_name="subcon-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
+          tar -czf "$dist_dir/$tar_name" -C "target/${{ matrix.target }}/release" "$bin_name"
+
+      - name: Build deb package
+        if: matrix.deb
+        shell: bash
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --target ${{ matrix.target }} --no-build
+          cp target/${{ matrix.target }}/debian/*.deb dist/
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
