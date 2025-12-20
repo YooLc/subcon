@@ -1,13 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use serde_json::{Map as JsonMap, Value};
 use serde_saphyr as serde_yaml;
+use tracing::warn;
 
 use crate::export::{Exporter, FieldPruner, RenderPass, TypeInjector};
 use crate::parser::Parser;
@@ -60,6 +61,8 @@ pub struct TargetSchema {
     pub template: BTreeMap<String, ValueTemplate>,
     #[serde(default)]
     pub ordered_keys: Option<Vec<String>>,
+    #[serde(default, rename = "not-implemented")]
+    pub not_implemented: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -198,9 +201,15 @@ impl TargetSchema {
             if other.ordered_keys.is_some() {
                 self.ordered_keys = other.ordered_keys.clone();
             }
+            if other.not_implemented.is_some() {
+                self.not_implemented = other.not_implemented;
+            }
         } else {
             if self.ordered_keys.is_none() {
                 self.ordered_keys = other.ordered_keys.clone();
+            }
+            if self.not_implemented.is_none() {
+                self.not_implemented = other.not_implemented;
             }
         }
 
@@ -419,6 +428,14 @@ impl SchemaRegistry {
         self.protocols.get(protocol)
     }
 
+    pub fn target_not_implemented(&self, protocol: &str, target: &str) -> bool {
+        self.protocols
+            .get(protocol)
+            .and_then(|schema| schema.targets.get(target))
+            .and_then(|schema| schema.not_implemented)
+            .unwrap_or(false)
+    }
+
     fn module(&self, protocol: &str) -> Option<&dyn ProtocolModule> {
         self.modules.get(protocol).map(|m| m.as_ref())
     }
@@ -451,6 +468,12 @@ impl SchemaRegistry {
                 schema.protocol
             )
         })?;
+        if target_schema.not_implemented.unwrap_or(false) {
+            return Err(anyhow!(
+                "protocol `{}` target `{target}` is not implemented",
+                schema.protocol
+            ));
+        }
 
         let normalized = schema.normalize(values)?;
         let module = self.module(protocol);
@@ -484,6 +507,7 @@ impl SchemaRegistry {
 
 fn load_protocol_files(dir: &Path) -> Result<HashMap<String, ProtocolSchema>> {
     let mut protocols = HashMap::new();
+    let mut protocol_paths: HashMap<String, PathBuf> = HashMap::new();
 
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
@@ -501,6 +525,16 @@ fn load_protocol_files(dir: &Path) -> Result<HashMap<String, ProtocolSchema>> {
             }
 
             let schema = ProtocolSchema::load_from_file(&path)?;
+            if let Some(existing) = protocol_paths.get(&schema.protocol) {
+                warn!(
+                    protocol = %schema.protocol,
+                    path = %path.display(),
+                    existing = %existing.display(),
+                    "duplicate protocol schema ignored"
+                );
+                continue;
+            }
+            protocol_paths.insert(schema.protocol.clone(), path.clone());
             protocols.insert(schema.protocol.clone(), schema);
         }
     }

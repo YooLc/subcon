@@ -23,20 +23,15 @@ pub fn load_from_profile(registry: &SchemaRegistry, path: impl AsRef<Path>) -> R
     let path = path.as_ref();
     let text = fs::read_to_string(path)
         .with_context(|| format!("failed to read profile {}", path.display()))?;
+    load_from_text(registry, &text)
+        .with_context(|| format!("failed to parse profile {}", path.display()))
+}
+
+pub fn load_from_text(registry: &SchemaRegistry, text: &str) -> Result<Vec<Proxy>> {
     let parsed = registry
-        .parse("clash", &text)
+        .parse("clash", text)
         .context("failed to parse clash profile")?;
-
-    let maybe_proxies = match parsed.get("proxies") {
-        None => return Ok(Vec::new()),
-        Some(v) => v,
-    };
-
-    let proxies = maybe_proxies
-        .as_array()
-        .ok_or_else(|| anyhow!("clash profile `proxies` must be an array"))?;
-
-    proxies.iter().map(parse_proxy).collect()
+    extract_proxies(&parsed)
 }
 
 #[allow(dead_code)]
@@ -78,6 +73,23 @@ fn parse_proxy(value: &Value) -> Result<Proxy> {
         protocol,
         values: map,
     })
+}
+
+fn extract_proxies(parsed: &Value) -> Result<Vec<Proxy>> {
+    let (field, proxies_value) = match parsed.get("proxies") {
+        Some(v) => ("proxies", v),
+        None => match parsed.get("proxy") {
+            Some(v) => ("proxy", v),
+            None => return Ok(Vec::new()),
+        },
+    };
+
+    match proxies_value {
+        Value::Array(items) => items.iter().map(parse_proxy).collect(),
+        Value::Object(_) => Ok(vec![parse_proxy(proxies_value)?]),
+        Value::Null => Ok(Vec::new()),
+        _ => Err(anyhow!("clash profile `{}` must be an array or map", field)),
+    }
 }
 
 fn normalize_protocol(protocol: &str) -> String {

@@ -64,6 +64,21 @@ pub fn gather_profile_paths(
     Ok(deduped)
 }
 
+/// Collect insert profile paths with de-duplication.
+pub fn gather_insert_paths(pref: &Pref, base_dir: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+
+    for p in &pref.common.insert_url {
+        let path = resolve_path(base_dir, p);
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+
+    paths
+}
+
 /// Apply node_pref overrides to proxies if the schema supports those fields.
 pub fn apply_node_pref(
     pref: &Pref,

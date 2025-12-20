@@ -1,0 +1,40 @@
+protocol: vmess
+includes:
+  - common
+  - tls
+
+fields:
+  uuid:
+    type: string
+  alterId:
+    type: integer
+  cipher:
+    type: string
+  packet-encoding:
+    type: string
+  global-padding:
+    type: boolean
+  authenticated-length:
+    type: boolean
+  servername:
+    type: string
+  network:
+    type: string
+
+targets:
+  clash:
+    template:
+      uuid:
+        from: uuid
+      servername:
+        from: servername
+      packet-encoding:
+        from: packet-encoding
+        optional: true
+        default: ""
+      network:
+        from: network
+        optional: true
+        default: "tcp"
+  surge:
+    not-implemented: true

@@ -28,7 +28,6 @@ targets:
       tls:
         from: tls
         optional: true
-        default: true
       sni:
         from: sni
         optional: true
@@ -63,7 +62,6 @@ targets:
       tls:
         from: tls
         optional: true
-        default: true
       skip-cert-verify:
         from: skip-cert-verify
         optional: true

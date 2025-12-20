@@ -5,11 +5,11 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::{Map as JsonMap, Value};
 use tracing::info;
 
+use crate::config::Pref;
 use crate::groups;
-use crate::proxy;
 use crate::schema::SchemaRegistry;
 
-use super::util::{gather_profile_paths, load_group_specs_from_pref, load_rules_from_pref};
+use super::util::{load_group_specs_from_pref, load_rules_from_pref};
 use super::{ApiError, RenderArgs};
 
 pub struct SurgeRenderer;
@@ -21,26 +21,36 @@ impl super::TargetRenderer for SurgeRenderer {
 }
 
 fn render_surge(args: RenderArgs<'_>) -> Result<String> {
-    let pref = &args.state.pref;
-    let registry = &args.state.registry;
+    let RenderArgs {
+        state,
+        mut proxies,
+        request_uri,
+    } = args;
+    let pref = &state.pref;
+    let registry = &state.registry;
+
+    let mut out = String::new();
+    if let Some(line) = build_managed_config_line(pref, request_uri.as_deref())? {
+        out.push_str(&line);
+        out.push('\n');
+    }
 
     let surge_base = pref
         .common
         .surge_rule_base
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("`common.surge_rule_base` must be set in pref.toml"))?;
-    let base_path = super::util::resolve_path(&args.state.base_dir, surge_base);
-    let mut out = std::fs::read_to_string(&base_path)
+    let base_path = super::util::resolve_path(&state.base_dir, surge_base);
+    let mut base_text = std::fs::read_to_string(&base_path)
         .with_context(|| format!("failed to read base config {}", base_path.display()))?;
-    if !out.ends_with('\n') {
-        out.push('\n');
+    if !base_text.ends_with('\n') {
+        base_text.push('\n');
     }
+    out.push_str(&base_text);
     out.push('\n');
 
-    let profiles = gather_profile_paths(pref, args.include_insert, &args.state.base_dir)?;
-    let mut proxies = proxy::load_from_paths(registry, profiles)
-        .context("failed to load proxies from profiles")?;
     super::util::apply_node_pref(pref, registry, &mut proxies);
+    proxies.retain(|proxy| !registry.target_not_implemented(&proxy.protocol, "surge"));
     if pref.common.sort {
         proxies.sort_by(|a, b| a.name.cmp(&b.name));
     }
@@ -77,7 +87,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         }
     }
 
-    let group_specs = load_group_specs_from_pref(pref, &args.state.base_dir)?;
+    let group_specs = load_group_specs_from_pref(pref, &state.base_dir)?;
     let proxy_groups =
         groups::build_groups(&group_specs, &proxies).context("failed to build proxy groups")?;
     info!(groups = proxy_groups.len(), "proxy groups built for surge");
@@ -92,7 +102,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         out.push('\n');
     }
 
-    let rules = load_rules_from_pref(pref, &args.state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &state.base_dir)?;
     let rendered_rules: Vec<String> = rules
         .iter()
         .map(|r| {
@@ -116,6 +126,35 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
     }
 
     Ok(out)
+}
+
+fn build_managed_config_line(pref: &Pref, request_uri: Option<&str>) -> Result<Option<String>> {
+    let managed = &pref.managed_config;
+    if !managed.write_managed_config {
+        return Ok(None);
+    }
+
+    let base_url = managed
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("`managed_config.base_url` must be set in pref.toml"))?;
+    let uri = request_uri
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("request uri missing for managed config"))?;
+    let base = base_url.trim_end_matches('/');
+    let path = if uri.starts_with('/') {
+        uri.to_string()
+    } else {
+        format!("/{uri}")
+    };
+
+    Ok(Some(format!(
+        "#!MANAGED-CONFIG {base}{path} interval={} strict={}",
+        managed.interval, managed.strict
+    )))
 }
 
 fn render_surge_proxy_line(

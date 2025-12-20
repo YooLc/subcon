@@ -7,9 +7,7 @@ use serde_saphyr::FlowMap;
 use tracing::info;
 
 use crate::groups;
-use crate::proxy;
-
-use super::util::{gather_profile_paths, load_group_specs_from_pref, load_rules_from_pref};
+use super::util::{load_group_specs_from_pref, load_rules_from_pref};
 use super::{ApiError, RenderArgs};
 
 pub struct ClashRenderer;
@@ -21,15 +19,16 @@ impl super::TargetRenderer for ClashRenderer {
 }
 
 fn render_clash(args: RenderArgs<'_>) -> Result<String> {
-    let pref = &args.state.pref;
-    let registry = &args.state.registry;
+    let RenderArgs { state, mut proxies, .. } = args;
+    let pref = &state.pref;
+    let registry = &state.registry;
 
     let clash_base = pref
         .common
         .clash_rule_base
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("`common.clash_rule_base` must be set in pref.toml"))?;
-    let base_path = super::util::resolve_path(&args.state.base_dir, clash_base);
+    let base_path = super::util::resolve_path(&state.base_dir, clash_base);
     let base_text = std::fs::read_to_string(&base_path)
         .with_context(|| format!("failed to read base config {}", base_path.display()))?;
     let mut base = serde_yaml::from_str::<Value>(&base_text)
@@ -42,10 +41,8 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
     base.remove("proxy-groups");
     base.remove("rules");
 
-    let profiles = gather_profile_paths(pref, args.include_insert, &args.state.base_dir)?;
-    let mut proxies = proxy::load_from_paths(registry, profiles)
-        .context("failed to load proxies from profiles")?;
     super::util::apply_node_pref(pref, registry, &mut proxies);
+    proxies.retain(|proxy| !registry.target_not_implemented(&proxy.protocol, "clash"));
     if pref.common.sort {
         proxies.sort_by(|a, b| a.name.cmp(&b.name));
     }
@@ -62,7 +59,7 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
         })
         .collect::<Result<_>>()?;
 
-    let group_specs = load_group_specs_from_pref(pref, &args.state.base_dir)?;
+    let group_specs = load_group_specs_from_pref(pref, &state.base_dir)?;
     let proxy_groups =
         groups::build_groups(&group_specs, &proxies).context("failed to build proxy groups")?;
     info!(groups = proxy_groups.len(), "proxy groups built");
@@ -72,7 +69,7 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
         .map(crate::export::clash::render_proxy_group)
         .collect();
 
-    let rules = load_rules_from_pref(pref, &args.state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &state.base_dir)?;
     let rendered_rules: Vec<Value> = rules
         .iter()
         .map(|r| {

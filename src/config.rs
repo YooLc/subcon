@@ -13,6 +13,8 @@ pub struct Pref {
     pub ruleset: Option<Ruleset>,
     #[serde(default)]
     pub rulesets: Vec<RulesetImport>,
+    #[serde(default)]
+    pub managed_config: ManagedConfig,
     pub server: Server,
     #[serde(default)]
     pub node_pref: NodePref,
@@ -23,6 +25,8 @@ pub struct Common {
     pub api_access_token: Option<String>,
     #[serde(default)]
     pub default_url: Vec<String>,
+    #[serde(default)]
+    pub allowed_domain: Vec<String>,
     #[serde(default)]
     pub enable_insert: bool,
     #[serde(default)]
@@ -64,6 +68,37 @@ pub struct RulesetImport {
 pub struct Server {
     pub listen: String,
     pub port: u16,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ManagedConfig {
+    #[serde(default)]
+    pub write_managed_config: bool,
+    #[serde(default, alias = "managed_config_prefix")]
+    pub base_url: Option<String>,
+    #[serde(default = "default_managed_config_interval", alias = "config_update_interval")]
+    pub interval: u64,
+    #[serde(default = "default_managed_config_strict", alias = "config_update_strict")]
+    pub strict: bool,
+}
+
+impl Default for ManagedConfig {
+    fn default() -> Self {
+        Self {
+            write_managed_config: false,
+            base_url: None,
+            interval: default_managed_config_interval(),
+            strict: default_managed_config_strict(),
+        }
+    }
+}
+
+fn default_managed_config_interval() -> u64 {
+    86_400
+}
+
+fn default_managed_config_strict() -> bool {
+    false
 }
 
 pub fn load_pref(path: impl AsRef<Path>) -> Result<Pref> {

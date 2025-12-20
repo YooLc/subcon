@@ -35,6 +35,20 @@ fields:
   smux:
     type: map
     optional: true
+  network:
+    type: string
+  # network: http
+  http-opts:
+    type: map
+  # network: h2
+  h2-opts:
+    type: map
+  # network: grpc
+  grpc-opts:
+    type: map
+  # network: ws
+  ws-opts:
+    type: map
 
 targets:
   clash:
@@ -72,6 +86,22 @@ targets:
         optional: true
       smux:
         from: smux
+        optional: true
+      network:
+        from: network
+        optional: true
+        default: "tcp"
+      http-opts:
+        from: http-opts
+        optional: true
+      h2-opts:
+        from: h2-opts
+        optional: true
+      grpc-opts:
+        from: grpc-opts
+        optional: true
+      ws-opts:
+        from: ws-opts
         optional: true
   surge:
     template:
