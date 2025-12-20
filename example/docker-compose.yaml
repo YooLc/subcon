@@ -1,0 +1,10 @@
+services:
+  subcon:
+    image: ghcr.io/yoolc/subcon:latest
+    container_name: subcon
+    restart: unless-stopped
+    ports:
+      - "25500:25500"
+    volumes:
+      - ./conf:/app/conf:ro
+    command: [ "--pref", "conf/pref.toml" ]

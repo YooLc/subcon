@@ -1,0 +1,35 @@
+version = 1
+
+[common]
+schema = "schema"
+clash_rule_base = "conf/base/clash.yml"
+surge_rule_base = "conf/base/surge.cfg"
+default_url = []
+allowed_domain = []
+enable_insert = false
+insert_url = []
+prepend_insert_url = false
+sort = true
+
+[node_pref]
+udp = true
+tfo = false
+
+[managed_config]
+write_managed_config = false
+managed_config_prefix = ""
+config_update_interval = 86400
+config_update_strict = false
+
+[[custom_groups]]
+import = "conf/snippets/groups.toml"
+
+[ruleset]
+enabled = true
+
+[[rulesets]]
+import = "conf/snippets/rulesets.toml"
+
+[server]
+listen = "0.0.0.0"
+port = 25500

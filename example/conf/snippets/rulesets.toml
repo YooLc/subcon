@@ -1,0 +1,11 @@
+[[rulesets]]
+group = "Direct"
+ruleset = "conf/rules/direct.list"
+
+[[rulesets]]
+group = "Default"
+ruleset = "conf/rules/proxy.list"
+
+[[rulesets]]
+group = "Default"
+ruleset = "[]FINAL"

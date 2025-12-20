@@ -1,0 +1,14 @@
+[[groups]]
+name = "Proxy"
+type = "select"
+rule = [".*"]
+
+[[groups]]
+name = "Direct"
+type = "select"
+rule = ["[]DIRECT"]
+
+[[groups]]
+name = "Default"
+type = "select"
+rule = ["[]Proxy", "[]DIRECT"]
