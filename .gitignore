@@ -1,2 +1,4 @@
 /target
 conf/*
+site
+.DS_Store
