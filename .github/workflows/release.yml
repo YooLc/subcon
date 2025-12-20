@@ -1,93 +1,287 @@
-name: Release
+name: release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag version to release"
+        required: true
+        type: string
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
+env:
+  APP_NAME: subcon
+  CROSS_VERSION: v0.2.5
+  RUST_BACKTRACE: 1
+
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  create-release:
+    name: create-release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            v="${{ github.event.inputs.version }}"
+          else
+            v="${{ github.ref_name }}"
+          fi
+
+          if [[ -z "$v" ]]; then
+            echo "version is empty" >&2
+            exit 1
+          fi
+
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release (draft)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release create "$VERSION" \
+            --draft \
+            --verify-tag \
+            --title "$VERSION"
+
+  build-binaries:
+    name: build-binaries (${{ matrix.target }})
+    needs: [create-release]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux (glibc)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: true
+            ext: ""
+            static: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+            ext: ""
+            static: false
+          - os: ubuntu-latest
+            target: riscv64gc-unknown-linux-gnu
+            use_cross: true
+            ext: ""
+            static: false
+
+          # Linux (musl, prefer static)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use_cross: true
+            ext: ""
+            static: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            use_cross: true
+            ext: ""
+            static: true
+          - os: ubuntu-latest
+            target: riscv64gc-unknown-linux-musl
+            use_cross: true
+            ext: ""
+            static: true
+
+          # macOS
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            use_cross: false
+            ext: ""
+            static: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false
+            ext: ""
+            static: false
+
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+            ext: ".exe"
+            static: false
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            use_cross: false
+            ext: ".exe"
+            static: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.os == 'ubuntu-latest' && matrix.use_cross
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/cross"
+          mkdir -p "$dir"
+          echo "$dir" >> "$GITHUB_PATH"
+          cd "$dir"
+          curl -LO "https://github.com/cross-rs/cross/releases/download/${CROSS_VERSION}/cross-x86_64-unknown-linux-musl.tar.gz"
+          tar xf cross-x86_64-unknown-linux-musl.tar.gz
+          echo "CARGO=cross" >> "$GITHUB_ENV"
+
+      - name: Configure cross image (riscv64 musl)
+        if: matrix.os == 'ubuntu-latest' && matrix.target == 'riscv64gc-unknown-linux-musl'
+        shell: bash
+        run: |
+          cat > Cross.toml <<'EOF'
+          [target.riscv64gc-unknown-linux-musl]
+          image = "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl:main"
+          EOF
+
+      - name: Build (release)
+        shell: bash
+        run: |
+          # Prefer fully static binaries on Linux-musl for maximum compatibility.
+          if [[ "${{ matrix.static }}" == "true" ]]; then
+            export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
+          fi
+
+          cargo_cmd="${CARGO:-cargo}"
+          $cargo_cmd build --release --target "${{ matrix.target }}"
+
+          bin="target/${{ matrix.target }}/release/${APP_NAME}${{ matrix.ext }}"
+          if [[ ! -f "$bin" ]]; then
+            echo "binary not found: $bin" >&2
+            ls -la "target/${{ matrix.target }}/release" || true
+            exit 1
+          fi
+
+          echo "BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          out="${APP_NAME}-${version}-${{ matrix.target }}.zip"
+          7z a "$out" "$BIN"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Package (Unix)
+        if: ${{ !startsWith(matrix.os, 'windows') }}
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          out="${APP_NAME}-${version}-${{ matrix.target }}.tar.gz"
+          tar czf "$out" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          echo "ASSET=$out" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          gh release upload "$version" "$ASSET"
+
+  build-deb:
+    name: build-deb (${{ matrix.target }})
+    needs: [create-release]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            deb: true
           - target: aarch64-unknown-linux-gnu
-            deb: true
-          - target: mips-unknown-linux-gnu
-            deb: true
-          - target: x86_64-apple-darwin
-            deb: false
-          - target: aarch64-apple-darwin
-            deb: false
-          - target: x86_64-pc-windows-gnu
-            deb: false
-          - target: aarch64-pc-windows-gnullvm
-            deb: false
+          - target: riscv64gc-unknown-linux-gnu
+    env:
+      TARGET: ${{ matrix.target }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.12.0
-
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          targets: ${{ matrix.target }}
+          toolchain: stable
+          target: ${{ env.TARGET }}
 
-      - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked
-
-      - name: Install macOS SDK
-        if: contains(matrix.target, 'apple-darwin')
+      - name: Install cross
         shell: bash
         run: |
-          set -euo pipefail
-          sdk_url="https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz"
-          curl -L "$sdk_url" -o macos-sdk.tar.xz
-          tar -xf macos-sdk.tar.xz
-          echo "SDKROOT=$PWD/MacOSX11.3.sdk" >> "$GITHUB_ENV"
-          echo "MACOSX_DEPLOYMENT_TARGET=10.15" >> "$GITHUB_ENV"
+          dir="$RUNNER_TEMP/cross"
+          mkdir -p "$dir"
+          echo "$dir" >> "$GITHUB_PATH"
+          cd "$dir"
+          curl -LO "https://github.com/cross-rs/cross/releases/download/${CROSS_VERSION}/cross-x86_64-unknown-linux-musl.tar.gz"
+          tar xf cross-x86_64-unknown-linux-musl.tar.gz
+          echo "CARGO=cross" >> "$GITHUB_ENV"
 
-      - name: Install deb tooling
-        if: matrix.deb
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
-
-      - name: Build
+      - name: Build binary (release)
         shell: bash
         run: |
-          cargo zigbuild --release --target ${{ matrix.target }}
+          cargo_cmd="${CARGO:-cargo}"
+          $cargo_cmd build --release --target "${TARGET}"
 
-      - name: Package tar.gz
-        shell: bash
-        run: |
-          set -euo pipefail
-          bin_name="subcon"
-          if [[ "${{ matrix.target }}" == *windows* ]]; then
-            bin_name="subcon.exe"
+          bin="target/${TARGET}/release/${APP_NAME}"
+          if [[ ! -f "$bin" ]]; then
+            echo "binary not found: $bin" >&2
+            ls -la "target/${TARGET}/release" || true
+            exit 1
           fi
-          dist_dir="dist"
-          mkdir -p "$dist_dir"
-          tar_name="subcon-${{ github.ref_name }}-${{ matrix.target }}.tar.gz"
-          tar -czf "$dist_dir/$tar_name" -C "target/${{ matrix.target }}/release" "$bin_name"
 
-      - name: Build deb package
-        if: matrix.deb
+      - name: Install cargo-deb
         shell: bash
         run: |
           cargo install cargo-deb --locked
-          cargo deb --target ${{ matrix.target }} --no-build
-          cp target/${{ matrix.target }}/debian/*.deb dist/
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
+      - name: Build .deb
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          deb_version="${version#v}"
+
+          cargo deb \
+            --target "${TARGET}" \
+            --no-build \
+            --no-strip \
+            --deb-version "${deb_version}-1"
+
+          deb_file="$(ls -t target/debian/*.deb | head -n 1)"
+          if [[ -z "$deb_file" || ! -f "$deb_file" ]]; then
+            echo "no .deb found in target/debian" >&2
+            ls -la target/debian || true
+            find target -maxdepth 3 -type f -name "*.deb" -print || true
+            exit 1
+          fi
+
+          echo "DEB_FILE=$deb_file" >> "$GITHUB_ENV"
+
+      - name: Upload .deb to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="${{ needs.create-release.outputs.version }}"
+          gh release upload "$version" "$DEB_FILE"
