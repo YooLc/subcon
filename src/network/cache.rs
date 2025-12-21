@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::config::NetworkConfig;
+use crate::paths::resolve_path;
 
 #[derive(Clone)]
 pub struct CacheStore {
@@ -144,13 +145,4 @@ impl CacheStore {
 fn sha256_hex(data: &[u8]) -> String {
     let digest = Sha256::digest(data);
     format!("{digest:x}")
-}
-
-fn resolve_path(base_dir: &Path, input: &str) -> PathBuf {
-    let candidate = PathBuf::from(input);
-    if candidate.is_absolute() {
-        candidate
-    } else {
-        base_dir.join(candidate)
-    }
 }

@@ -7,16 +7,8 @@ use tracing::warn;
 
 use crate::config::Pref;
 use crate::network::Network;
+use crate::paths::resolve_path;
 use crate::{groups, rules};
-
-pub fn resolve_path(base_dir: &Path, input: &str) -> PathBuf {
-    let candidate = PathBuf::from(input);
-    if candidate.is_absolute() {
-        candidate
-    } else {
-        base_dir.join(candidate)
-    }
-}
 
 /// Collect profile paths in order with de-duplication and optional inserts.
 pub fn gather_profile_paths(

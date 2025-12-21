@@ -8,6 +8,8 @@ use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use tracing::warn;
 
+use crate::paths::resolve_path;
+
 #[derive(Debug, Deserialize)]
 struct RulesetsToml {
     #[serde(default)]
@@ -97,12 +99,7 @@ impl RuleSource {
             return Self::Url(raw.to_string());
         }
 
-        let path = PathBuf::from(raw);
-        if path.is_absolute() {
-            Self::File(path)
-        } else {
-            Self::File(base_dir.join(path))
-        }
+        Self::File(resolve_path(base_dir, raw))
     }
 }
 

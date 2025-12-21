@@ -7,6 +7,7 @@ mod rules;
 mod config;
 mod network;
 mod server;
+mod paths;
 
 use anyhow::Result;
 use tracing_subscriber::{fmt, EnvFilter};

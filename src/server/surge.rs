@@ -7,6 +7,7 @@ use tracing::info;
 
 use crate::config::Pref;
 use crate::groups;
+use crate::paths::resolve_path;
 use crate::schema::SchemaRegistry;
 
 use super::util::{load_group_specs_from_pref, load_rules_from_pref};
@@ -40,7 +41,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         .surge_rule_base
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("`common.surge_rule_base` must be set in pref.toml"))?;
-    let base_path = super::util::resolve_path(&state.base_dir, surge_base);
+    let base_path = resolve_path(&state.base_dir, surge_base);
     let mut base_text = std::fs::read_to_string(&base_path)
         .with_context(|| format!("failed to read base config {}", base_path.display()))?;
     if !base_text.ends_with('\n') {

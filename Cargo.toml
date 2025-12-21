@@ -18,3 +18,9 @@ tower-http = { version = "0.6.8", features = ["trace"] }
 clap = { version = "4.5.53", features = ["derive"] }
 reqwest = { version = "0.12.15", default-features = false, features = ["gzip", "rustls-tls"] }
 sha2 = "0.10.9"
+
+[package.metadata.deb]
+assets = [
+  ["example/conf", "etc/subcon/conf", "755"],
+  ["schema", "etc/subcon/schema", "755"],
+]

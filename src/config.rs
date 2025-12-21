@@ -3,6 +3,8 @@ use std::{fs, path::Path};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::paths::resolve_path;
+
 #[derive(Debug, Deserialize)]
 pub struct Pref {
     #[allow(dead_code)]
@@ -137,8 +139,8 @@ fn default_network_ttl_seconds() -> u64 {
 }
 
 pub fn load_pref(path: impl AsRef<Path>) -> Result<Pref> {
-    let path = path.as_ref();
-    let text = fs::read_to_string(path)
+    let path = resolve_path(Path::new("."), path.as_ref());
+    let text = fs::read_to_string(&path)
         .with_context(|| format!("failed to read pref file {}", path.display()))?;
     let pref: Pref = toml::from_str(&text)
         .with_context(|| format!("failed to parse pref file {}", path.display()))?;

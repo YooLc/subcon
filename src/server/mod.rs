@@ -17,9 +17,10 @@ use tracing::{info, warn};
 
 use crate::config::{Pref, load_pref};
 use crate::network::Network;
+use crate::paths::resolve_path;
 use crate::proxy;
 use crate::schema::SchemaRegistry;
-use crate::server::util::{gather_insert_paths, gather_profile_paths, resolve_path};
+use crate::server::util::{gather_insert_paths, gather_profile_paths};
 
 mod clash;
 mod surge;

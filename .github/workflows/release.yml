@@ -184,7 +184,13 @@ jobs:
         run: |
           version="${{ needs.create-release.outputs.version }}"
           out="${APP_NAME}-${version}-${{ matrix.target }}.zip"
-          7z a "$out" "$BIN"
+          pkg_dir="${APP_NAME}"
+          rm -rf "$pkg_dir"
+          mkdir -p "$pkg_dir"
+          cp "$BIN" "$pkg_dir/${APP_NAME}${{ matrix.ext }}"
+          cp -R "example/conf" "$pkg_dir/conf"
+          cp -R "schema" "$pkg_dir/schema"
+          7z a "$out" "$pkg_dir"
           echo "ASSET=$out" >> "$GITHUB_ENV"
 
       - name: Package (Unix)
@@ -193,7 +199,13 @@ jobs:
         run: |
           version="${{ needs.create-release.outputs.version }}"
           out="${APP_NAME}-${version}-${{ matrix.target }}.tar.gz"
-          tar czf "$out" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+          pkg_dir="${APP_NAME}"
+          rm -rf "$pkg_dir"
+          mkdir -p "$pkg_dir"
+          cp "$BIN" "$pkg_dir/${APP_NAME}${{ matrix.ext }}"
+          cp -R "example/conf" "$pkg_dir/conf"
+          cp -R "schema" "$pkg_dir/schema"
+          tar czf "$out" "$pkg_dir"
           echo "ASSET=$out" >> "$GITHUB_ENV"
 
       - name: Upload to GitHub Release
