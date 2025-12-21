@@ -20,16 +20,21 @@ impl super::TargetRenderer for ClashRenderer {
 }
 
 fn render_clash(args: RenderArgs<'_>) -> Result<String> {
-    let RenderArgs { state, mut proxies, .. } = args;
-    let pref = &state.pref;
-    let registry = &state.registry;
+    let RenderArgs {
+        runtime,
+        base_dir,
+        mut proxies,
+        ..
+    } = args;
+    let pref = &runtime.pref;
+    let registry = &runtime.registry;
 
     let clash_base = pref
         .common
         .clash_rule_base
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("`common.clash_rule_base` must be set in pref.toml"))?;
-    let base_path = resolve_path(&state.base_dir, clash_base);
+    let base_path = resolve_path(base_dir, clash_base);
     let base_text = std::fs::read_to_string(&base_path)
         .with_context(|| format!("failed to read base config {}", base_path.display()))?;
     let mut base = serde_yaml::from_str::<Value>(&base_text)
@@ -60,7 +65,7 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
         })
         .collect::<Result<_>>()?;
 
-    let group_specs = load_group_specs_from_pref(pref, &state.base_dir)?;
+    let group_specs = load_group_specs_from_pref(pref, base_dir)?;
     let proxy_groups =
         groups::build_groups(&group_specs, &proxies).context("failed to build proxy groups")?;
     info!(groups = proxy_groups.len(), "proxy groups built");
@@ -70,7 +75,7 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
         .map(crate::export::clash::render_proxy_group)
         .collect();
 
-    let rules = load_rules_from_pref(pref, &state.network, &state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &runtime.network, base_dir)?;
     let rendered_rules: Vec<Value> = rules
         .iter()
         .map(|r| {

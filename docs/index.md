@@ -15,6 +15,14 @@ and `conf/`, so you can tune behavior without recompiling.
     - Profiles and rules live on disk for quick iteration.
     - A single `/sub` endpoint delivers target-specific output.
 
+## Web UI
+Subcon includes an embedded control panel at `/` for managing profiles, rules,
+schema mappings, and runtime control actions.
+
+- Login uses the server URL and `common.api_access_token`.
+- API access is same-origin only (CSRF-protected).
+- Credentials are stored in the browser for convenience and can be cleared via Logout.
+
 ## Request flow
 ``` mermaid
 graph LR

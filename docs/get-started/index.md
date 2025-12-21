@@ -42,10 +42,11 @@ At minimum, make sure these fields are set in `conf/pref.toml`:
 - `common.clash_rule_base`
 - `common.surge_rule_base`
 - `common.default_url` or a plan to pass `url`
+- `common.api_access_token` if you plan to use the Web UI or `/api`
 - `network.allowed_domain` when using remote subscriptions
 
 !!! warning
-    If you plan to use insert profiles, generate a strong `api_access_token` and put it in `[common]` section of `pref.toml`. Please keep `pref.toml` private (do not commit or share it). 
+    The Web UI and `/api` require `common.api_access_token`. If you plan to use insert profiles, this token is also required to include inserts. Keep `pref.toml` private (do not commit or share it).
 
     You can generate a token with:
     ```bash
@@ -83,6 +84,13 @@ At minimum, make sure these fields are set in `conf/pref.toml`:
 ```bash
 curl "http://127.0.0.1:25500/sub?target=clash"
 ```
+
+## Web UI
+Open the control panel in your browser:
+
+- `http://127.0.0.1:25500/`
+- Enter the server URL (same origin) and `common.api_access_token` to sign in.
+- Use Logout to clear credentials stored in the browser.
 
 ## Next steps
 - Review [General Settings](../configuration/general-settings.md).

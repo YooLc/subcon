@@ -1,18 +1,22 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Query, State},
-    http::{StatusCode, Uri},
+    http::{Request, StatusCode, Uri},
+    middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
 };
 use clap::Parser;
 use serde::Deserialize;
-use tokio::net::TcpListener;
-use tower_http::classify::ServerErrorsFailureClass;
-use tower_http::trace::TraceLayer;
+use tokio::{net::TcpListener, sync::RwLock};
 use tracing::{info, warn};
 
 use crate::config::{Pref, load_pref};
@@ -23,8 +27,10 @@ use crate::schema::SchemaRegistry;
 use crate::server::util::{gather_insert_paths, gather_profile_paths};
 
 mod clash;
+mod api;
 mod surge;
 mod util;
+mod web;
 
 #[derive(Parser, Debug)]
 #[command(name = "subcon")]
@@ -39,85 +45,34 @@ struct Cli {
 
 pub async fn run() -> Result<()> {
     let args = Cli::parse();
-    let pref_path = PathBuf::from(&args.pref);
     let base_dir = PathBuf::from(".");
-
-    let pref = Arc::new(load_pref(&pref_path)?);
-    let schema_rel = pref
-        .common
-        .schema
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("`common.schema` must be set in pref.toml"))?;
-    let schema_path = resolve_path(&base_dir, schema_rel);
-
-    let registry = Arc::new(SchemaRegistry::with_builtin(&schema_path)?);
-    let network = Network::new(&pref.network, &base_dir)?;
+    let pref_path = resolve_path(&base_dir, &args.pref);
 
     let mut targets: HashMap<String, Arc<dyn TargetRenderer>> = HashMap::new();
     targets.insert("clash".to_string(), Arc::new(clash::ClashRenderer));
     targets.insert("surge".to_string(), Arc::new(surge::SurgeRenderer));
 
+    let runtime = build_runtime(&pref_path, &base_dir)?;
+
+    let listen_addr = format!(
+        "{}:{}",
+        runtime.pref.server.listen, runtime.pref.server.port
+    );
+
     let state = AppState {
-        pref,
-        registry,
+        runtime: Arc::new(RwLock::new(runtime)),
         targets,
+        pref_path,
         base_dir,
-        network,
     };
 
     let app = Router::new()
         .route("/sub", get(handle_sub))
-        .fallback(handle_404)
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(|req: &axum::http::Request<_>| {
-                    tracing::info_span!(
-                        "http_request",
-                        method = %req.method(),
-                        version = ?req.version(),
-                        remote = %req
-                            .headers()
-                            .get("X-Forwarded-For")
-                            .and_then(|v| v.to_str().ok())
-                            .map(|s| s.to_string())
-                            .or_else(|| req
-                                .extensions()
-                                .get::<std::net::SocketAddr>()
-                                .map(|addr| addr.ip().to_string()))
-                            .unwrap_or_else(|| "-".to_string())
-                    )
-                })
-                .on_request(|req: &axum::http::Request<_>, _span: &tracing::Span| {
-                    info!(uri = %req.uri(), "incoming request");
-                })
-                .on_response(
-                    |res: &axum::http::Response<_>, latency: std::time::Duration, _span: &tracing::Span| {
-                        let status = res.status();
-                        if status.is_client_error() || status.is_server_error() {
-                            warn!(status = %status, latency_ms = latency.as_millis(), "http response");
-                        } else {
-                            info!(status = %status, latency_ms = latency.as_millis(), "http response");
-                        }
-                    },
-                )
-                .on_failure(
-                    |failure_class: ServerErrorsFailureClass,
-                     latency: std::time::Duration,
-                     _span: &tracing::Span| {
-                        match failure_class {
-                            ServerErrorsFailureClass::StatusCode(status) => {
-                                warn!(status = %status, latency_ms = latency.as_millis(), "http failure");
-                            }
-                            ServerErrorsFailureClass::Error(error) => {
-                                warn!(error = %error, latency_ms = latency.as_millis(), "http failure");
-                            }
-                        }
-                    },
-                ),
-        )
+        .nest("/api", api::router(state.clone()))
+        .fallback(web::handle_web)
+        .layer(axum::middleware::from_fn(log_requests))
         .with_state(state.clone());
 
-    let listen_addr = format!("{}:{}", state.pref.server.listen, state.pref.server.port);
     info!("binding subscription server to {listen_addr}");
     let listener = TcpListener::bind(&listen_addr)
         .await
@@ -127,13 +82,67 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+async fn log_requests(req: Request<Body>, next: Next) -> Response {
+    let path = req.uri().path().to_string();
+    let method = req.method().to_string();
+    let start = std::time::Instant::now();
+    let res = next.run(req).await;
+    if !path.starts_with("/api") && !path.starts_with("/_next") {
+        let status = res.status();
+        let latency = start.elapsed();
+        if status.is_client_error() || status.is_server_error() {
+            warn!(
+                method = %method,
+                path = %path,
+                status = %status,
+                latency_ms = latency.as_millis(),
+                "http response"
+            );
+        } else {
+            info!(
+                method = %method,
+                path = %path,
+                status = %status,
+                latency_ms = latency.as_millis(),
+                "http response"
+            );
+        }
+    }
+    res
+}
+
 #[derive(Clone)]
 pub struct AppState {
+    runtime: Arc<RwLock<RuntimeState>>,
+    targets: HashMap<String, Arc<dyn TargetRenderer>>,
+    pref_path: PathBuf,
+    base_dir: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct RuntimeState {
     pub pref: Arc<Pref>,
     pub registry: Arc<SchemaRegistry>,
-    pub targets: HashMap<String, Arc<dyn TargetRenderer>>,
-    pub base_dir: PathBuf,
     pub network: Network,
+}
+
+fn build_runtime(pref_path: &Path, base_dir: &Path) -> Result<RuntimeState> {
+    let pref = load_pref(pref_path)?;
+    let schema_rel = pref
+        .common
+        .schema
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("`common.schema` must be set in pref.toml"))?;
+    let schema_path = resolve_path(base_dir, schema_rel);
+
+    let registry = SchemaRegistry::with_builtin(&schema_path)?;
+    let network = Network::new(&pref.network, base_dir)?;
+
+    Ok(RuntimeState {
+        pref: Arc::new(pref),
+        registry: Arc::new(registry),
+        network,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,10 +170,11 @@ async fn handle_sub(
         }
     };
 
+    let runtime = state.runtime.read().await.clone();
     let include_insert = params
         .token
         .as_ref()
-        .zip(state.pref.common.api_access_token.as_ref())
+        .zip(runtime.pref.common.api_access_token.as_ref())
         .map(|(provided, expected)| provided == expected)
         .unwrap_or(false);
     info!(
@@ -174,10 +184,13 @@ async fn handle_sub(
         "handling /sub request"
     );
 
-    let proxies = load_proxies_for_request(&state, params.url.as_deref(), include_insert).await?;
+    let proxies =
+        load_proxies_for_request(&runtime, &state.base_dir, params.url.as_deref(), include_insert)
+            .await?;
 
     let body = renderer.render(RenderArgs {
-        state: &state,
+        runtime: &runtime,
+        base_dir: &state.base_dir,
         proxies,
         request_uri: Some(uri.to_string()),
     })?;
@@ -191,18 +204,19 @@ async fn handle_sub(
 }
 
 async fn load_proxies_for_request(
-    state: &AppState,
+    runtime: &RuntimeState,
+    base_dir: &Path,
     url: Option<&str>,
     include_insert: bool,
 ) -> Result<Vec<crate::proxy::Proxy>, ApiError> {
-    let pref = &state.pref;
-    let registry = &state.registry;
+    let pref = &runtime.pref;
+    let registry = &runtime.registry;
 
     let mut proxies = if let Some(raw_url) = url {
         let parsed_url = parse_subscription_url(raw_url)?;
-        fetch_proxies_from_url(&state.network, registry, &parsed_url).await?
+        fetch_proxies_from_url(&runtime.network, registry, &parsed_url).await?
     } else {
-        let profiles = gather_profile_paths(pref, include_insert, &state.base_dir)
+        let profiles = gather_profile_paths(pref, include_insert, base_dir)
             .map_err(ApiError::internal)?;
         proxy::load_from_paths(registry, profiles)
             .context("failed to load proxies from profiles")
@@ -210,7 +224,7 @@ async fn load_proxies_for_request(
     };
 
     if url.is_some() && include_insert && pref.common.enable_insert {
-        let insert_paths = gather_insert_paths(pref, &state.base_dir);
+        let insert_paths = gather_insert_paths(pref, base_dir);
         if insert_paths.is_empty() {
             warn!("insert enabled but no insert_url provided");
         } else {
@@ -261,13 +275,9 @@ async fn fetch_proxies_from_url(
         .map_err(|err| ApiError::new(err.status, err.to_string()))
 }
 
-async fn handle_404(uri: axum::http::Uri) -> impl IntoResponse {
-    warn!(uri = %uri, "unmatched route");
-    (StatusCode::NOT_FOUND, "not found")
-}
-
 pub struct RenderArgs<'a> {
-    pub state: &'a AppState,
+    pub runtime: &'a RuntimeState,
+    pub base_dir: &'a Path,
     pub proxies: Vec<crate::proxy::Proxy>,
     pub request_uri: Option<String>,
 }
@@ -289,8 +299,8 @@ impl ApiError {
         }
     }
 
-    fn internal(err: anyhow::Error) -> Self {
-        let msg = format!("{err:?}");
+    fn internal(err: impl Into<anyhow::Error>) -> Self {
+        let msg = format!("{:?}", err.into());
         warn!(error = %msg, "internal error during render");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,

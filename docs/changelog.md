@@ -4,6 +4,13 @@ icon: lucide/list
 
 # Changelog
 
+## 0.3.0
+- Added embedded web control panel with friendly editors + Monaco code mode for profiles, rules, and schema.
+- Added control panel actions for reload/restart and live log viewing.
+- Added subscription builder, groups view, and cache inspector.
+- Added login gate with token auth and same-origin CSRF enforcement for /api.
+- Added /api/ping health check and tightened API cache headers for dynamic responses.
+
 ## 0.2.1
 - Fix: Surge DST-PORT rules are now emitted as DEST-PORT.
 

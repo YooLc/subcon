@@ -21,6 +21,12 @@ pub struct CacheStore {
 }
 
 #[derive(Clone)]
+pub struct CacheSnapshot {
+    pub url: String,
+    pub ttl_seconds: u64,
+}
+
+#[derive(Clone)]
 struct CacheEntry {
     expires_at: SystemTime,
     sha256: String,
@@ -139,6 +145,22 @@ impl CacheStore {
     fn cache_path_for_url(&self, url: &reqwest::Url) -> PathBuf {
         let key = sha256_hex(url.as_str().as_bytes());
         self.dir.join(format!("{key}.cache"))
+    }
+
+    pub async fn list_entries(&self) -> Vec<CacheSnapshot> {
+        let now = SystemTime::now();
+        let entries = self.entries.lock().await;
+        entries
+            .iter()
+            .map(|(url, entry)| CacheSnapshot {
+                url: url.clone(),
+                ttl_seconds: entry
+                    .expires_at
+                    .duration_since(now)
+                    .unwrap_or_default()
+                    .as_secs(),
+            })
+            .collect()
     }
 }
 

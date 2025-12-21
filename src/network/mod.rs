@@ -10,6 +10,7 @@ mod cache;
 mod security;
 
 use cache::CacheStore;
+pub use cache::CacheSnapshot;
 use security::Security;
 
 #[derive(Clone)]
@@ -118,6 +119,10 @@ impl Network {
 
         let text = response.text().await.context("failed to read response")?;
         Ok(text)
+    }
+
+    pub async fn list_cache(&self) -> Vec<CacheSnapshot> {
+        self.cache.list_entries().await
     }
 }
 

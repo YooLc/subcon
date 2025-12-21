@@ -23,12 +23,13 @@ impl super::TargetRenderer for SurgeRenderer {
 
 fn render_surge(args: RenderArgs<'_>) -> Result<String> {
     let RenderArgs {
-        state,
+        runtime,
+        base_dir,
         mut proxies,
         request_uri,
     } = args;
-    let pref = &state.pref;
-    let registry = &state.registry;
+    let pref = &runtime.pref;
+    let registry = &runtime.registry;
 
     let mut out = String::new();
     if let Some(line) = build_managed_config_line(pref, request_uri.as_deref())? {
@@ -41,7 +42,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         .surge_rule_base
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("`common.surge_rule_base` must be set in pref.toml"))?;
-    let base_path = resolve_path(&state.base_dir, surge_base);
+    let base_path = resolve_path(base_dir, surge_base);
     let mut base_text = std::fs::read_to_string(&base_path)
         .with_context(|| format!("failed to read base config {}", base_path.display()))?;
     if !base_text.ends_with('\n') {
@@ -88,7 +89,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         }
     }
 
-    let group_specs = load_group_specs_from_pref(pref, &state.base_dir)?;
+    let group_specs = load_group_specs_from_pref(pref, base_dir)?;
     let proxy_groups =
         groups::build_groups(&group_specs, &proxies).context("failed to build proxy groups")?;
     info!(groups = proxy_groups.len(), "proxy groups built for surge");
@@ -103,7 +104,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         out.push('\n');
     }
 
-    let rules = load_rules_from_pref(pref, &state.network, &state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &runtime.network, base_dir)?;
     let rendered_rules: Vec<String> = rules
         .iter()
         .map(|r| {

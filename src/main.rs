@@ -8,14 +8,11 @@ mod config;
 mod network;
 mod server;
 mod paths;
+mod logging;
 
 use anyhow::Result;
-use tracing_subscriber::{fmt, EnvFilter};
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .init();
+    logging::init_logging();
     server::run().await
 }
