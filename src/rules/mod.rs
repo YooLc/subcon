@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -17,7 +17,23 @@ struct RulesetsToml {
 #[derive(Debug, Deserialize)]
 pub struct RulesetSpec {
     pub group: String,
-    pub ruleset: String,
+    pub ruleset: RulesetRef,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum RulesetRef {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl RulesetRef {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::Single(value) => vec![value],
+            Self::Multiple(values) => values,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -68,12 +84,17 @@ impl Rule {
 enum RuleSource {
     Inline(String),
     File(PathBuf),
+    Url(String),
 }
 
 impl RuleSource {
     fn parse(raw: &str, base_dir: &Path) -> Self {
         if let Some(inline) = raw.strip_prefix("[]") {
             return Self::Inline(inline.to_string());
+        }
+
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            return Self::Url(raw.to_string());
         }
 
         let path = PathBuf::from(raw);
@@ -85,10 +106,24 @@ impl RuleSource {
     }
 }
 
+#[allow(dead_code)]
 pub fn load_rules(
     rulesets_path: impl AsRef<Path>,
     rules_base_dir: impl AsRef<Path>,
 ) -> Result<Vec<Rule>> {
+    load_rules_with_fetcher(rulesets_path, rules_base_dir, |url| {
+        Err(anyhow!("remote ruleset not supported: {url}"))
+    })
+}
+
+pub fn load_rules_with_fetcher<F>(
+    rulesets_path: impl AsRef<Path>,
+    rules_base_dir: impl AsRef<Path>,
+    fetcher: F,
+) -> Result<Vec<Rule>>
+where
+    F: Fn(&str) -> Result<String>,
+{
     let rulesets_path = rulesets_path.as_ref();
     let rules_base_dir = rules_base_dir.as_ref();
 
@@ -103,38 +138,59 @@ pub fn load_rules(
 
     for ruleset in parsed.rulesets {
         let group = ruleset.group;
-        let ruleset_trimmed = ruleset.ruleset.trim();
-        if ruleset_trimmed.eq_ignore_ascii_case("[]FINAL") {
-            final_groups.push(group);
-            continue;
-        }
-
-        let source = RuleSource::parse(ruleset_trimmed, rules_base_dir);
-        match source {
-            RuleSource::Inline(rule_text) => {
-                if let Some(rule) = parse_rule_line(&rule_text, &group)
-                    .with_context(|| format!("failed to parse inline rule `{rule_text}`"))?
-                {
-                    rules.push(rule);
-                }
+        for entry in ruleset.ruleset.into_vec() {
+            let ruleset_trimmed = entry.trim();
+            if ruleset_trimmed.eq_ignore_ascii_case("[]FINAL") {
+                final_groups.push(group.clone());
+                continue;
             }
-            RuleSource::File(path) => {
-                let text = fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read ruleset {}", path.display()))?;
-                for (idx, line) in text.lines().enumerate() {
-                    let line_no = idx + 1;
-                    match parse_rule_line(line, &group) {
-                        Ok(Some(rule)) => rules.push(rule),
-                        Ok(None) => {}
-                        Err(err) => {
-                            return Err(err).with_context(|| {
-                                format!(
-                                    "failed to parse rule at {}:{} (group `{}`)",
-                                    path.display(),
-                                    line_no,
-                                    group
-                                )
-                            })
+
+            let source = RuleSource::parse(ruleset_trimmed, rules_base_dir);
+            match source {
+                RuleSource::Inline(rule_text) => {
+                    if let Some(rule) = parse_rule_line(&rule_text, &group)
+                        .with_context(|| format!("failed to parse inline rule `{rule_text}`"))?
+                    {
+                        rules.push(rule);
+                    }
+                }
+                RuleSource::File(path) => {
+                    let text = fs::read_to_string(&path)
+                        .with_context(|| format!("failed to read ruleset {}", path.display()))?;
+                    for (idx, line) in text.lines().enumerate() {
+                        let line_no = idx + 1;
+                        match parse_rule_line(line, &group) {
+                            Ok(Some(rule)) => rules.push(rule),
+                            Ok(None) => {}
+                            Err(err) => {
+                                return Err(err).with_context(|| {
+                                    format!(
+                                        "failed to parse rule at {}:{} (group `{}`)",
+                                        path.display(),
+                                        line_no,
+                                        group
+                                    )
+                                })
+                            }
+                        }
+                    }
+                }
+                RuleSource::Url(url) => {
+                    let text = fetcher(&url)
+                        .with_context(|| format!("failed to fetch ruleset {}", url))?;
+                    for (idx, line) in text.lines().enumerate() {
+                        let line_no = idx + 1;
+                        match parse_rule_line(line, &group) {
+                            Ok(Some(rule)) => rules.push(rule),
+                            Ok(None) => {}
+                            Err(err) => {
+                                return Err(err).with_context(|| {
+                                    format!(
+                                        "failed to parse rule at {}:{} (group `{}`)",
+                                        url, line_no, group
+                                    )
+                                })
+                            }
                         }
                     }
                 }
@@ -224,7 +280,7 @@ fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
         return Ok(None);
     }
 
-    let parts: Vec<String> = trimmed.split(',').map(|p| p.trim().to_string()).collect();
+    let parts = split_rule_parts(trimmed);
     if parts.is_empty() || parts[0].is_empty() {
         return Ok(None);
     }
@@ -235,24 +291,27 @@ fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
         return Ok(None);
     }
     let rule_type = RuleType::new(raw_type);
-    let content = parts
-        .get(1)
-        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
-
-    if content.is_none() && parts.len() == 1 {
-        // Allow type-only rules like FINAL.
-    }
-
     let mut flags = RuleFlags::default();
-    for param in parts.iter().skip(2) {
-        if param.is_empty() {
+    let mut content_parts: Vec<String> = parts.iter().skip(1).cloned().collect();
+    while let Some(last) = content_parts.last() {
+        if last.is_empty() {
+            content_parts.pop();
             continue;
         }
-        match param.to_ascii_lowercase().as_str() {
-            "no-resolve" => flags.no_resolve = true,
-            _ => {}
+        match last.to_ascii_lowercase().as_str() {
+            "no-resolve" => {
+                flags.no_resolve = true;
+                content_parts.pop();
+            }
+            _ => break,
         }
     }
+
+    let content = if content_parts.is_empty() {
+        None
+    } else {
+        Some(content_parts.join(","))
+    };
 
     Ok(Some(Rule {
         rule_type,
@@ -300,6 +359,35 @@ fn is_supported_rule_type(raw: &str) -> bool {
         "MATCH" => true,
         _ => false,
     }
+}
+
+fn split_rule_parts(line: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+
+    for ch in line.chars() {
+        match ch {
+            '(' => {
+                depth = depth.saturating_add(1);
+                current.push(ch);
+            }
+            ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    parts.push(current.trim().to_string());
+    parts
 }
 
 fn is_ip_rule(rule: &Rule) -> bool {
@@ -372,5 +460,24 @@ mod tests {
         assert_eq!(reordered[0], domain);
         assert_eq!(reordered[1], rule_set);
         assert_eq!(reordered[2], ip);
+    }
+
+    #[test]
+    fn parse_rule_with_nested_commas() {
+        let rule = parse_rule_line(
+            "AND,((DOMAIN-KEYWORD,example),(DOMAIN-SUFFIX,example.com))",
+            "G",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(rule.rule_type.to_string(), "AND");
+        assert_eq!(
+            rule.content.as_deref(),
+            Some("((DOMAIN-KEYWORD,example),(DOMAIN-SUFFIX,example.com))")
+        );
+        assert_eq!(
+            rule.render(),
+            "AND,((DOMAIN-KEYWORD,example),(DOMAIN-SUFFIX,example.com)),G"
+        );
     }
 }

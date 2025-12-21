@@ -142,7 +142,7 @@ struct SubQuery {
     url: Option<String>,
 }
 
-const SUBSCRIPTION_USER_AGENTS: [&str; 2] = ["Clash/v1.18.0", "mihomo/1.18.3"];
+const SUBSCRIPTION_USER_AGENTS: [&str; 2] = ["Clash/v1.18.0", "mihomo/1.19.17"];
 
 async fn handle_sub(
     State(state): State<AppState>,
@@ -173,8 +173,7 @@ async fn handle_sub(
         "handling /sub request"
     );
 
-    let proxies =
-        load_proxies_for_request(&state, params.url.as_deref(), include_insert).await?;
+    let proxies = load_proxies_for_request(&state, params.url.as_deref(), include_insert).await?;
 
     let body = renderer.render(RenderArgs {
         state: &state,
@@ -202,8 +201,8 @@ async fn load_proxies_for_request(
         let parsed_url = parse_subscription_url(raw_url)?;
         fetch_proxies_from_url(&state.network, registry, &parsed_url).await?
     } else {
-        let profiles =
-            gather_profile_paths(pref, include_insert, &state.base_dir).map_err(ApiError::internal)?;
+        let profiles = gather_profile_paths(pref, include_insert, &state.base_dir)
+            .map_err(ApiError::internal)?;
         proxy::load_from_paths(registry, profiles)
             .context("failed to load proxies from profiles")
             .map_err(ApiError::internal)?
@@ -229,13 +228,10 @@ async fn load_proxies_for_request(
     Ok(proxies)
 }
 
-fn parse_subscription_url(
-    raw: &str,
-) -> Result<reqwest::Url, ApiError> {
+fn parse_subscription_url(raw: &str) -> Result<reqwest::Url, ApiError> {
     let trimmed = raw.trim();
-    let url = reqwest::Url::parse(trimmed).map_err(|err| {
-        ApiError::new(StatusCode::BAD_REQUEST, format!("invalid url: {err}"))
-    })?;
+    let url = reqwest::Url::parse(trimmed)
+        .map_err(|err| ApiError::new(StatusCode::BAD_REQUEST, format!("invalid url: {err}")))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,

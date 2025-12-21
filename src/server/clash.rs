@@ -69,7 +69,7 @@ fn render_clash(args: RenderArgs<'_>) -> Result<String> {
         .map(crate::export::clash::render_proxy_group)
         .collect();
 
-    let rules = load_rules_from_pref(pref, &state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &state.network, &state.base_dir)?;
     let rendered_rules: Vec<Value> = rules
         .iter()
         .map(|r| {

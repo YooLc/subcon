@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow, bail};
+use reqwest::Url;
 use tracing::warn;
 
 use crate::config::Pref;
+use crate::network::Network;
 use crate::{groups, rules};
 
 pub fn resolve_path(base_dir: &Path, input: &str) -> PathBuf {
@@ -124,14 +126,50 @@ pub fn load_group_specs_from_pref(pref: &Pref, base_dir: &Path) -> Result<Vec<gr
     Ok(specs)
 }
 
-pub fn load_rules_from_pref(pref: &Pref, base_dir: &Path) -> Result<Vec<rules::Rule>> {
+const RULESET_USER_AGENTS: [&str; 1] = [concat!("subcon/", env!("CARGO_PKG_VERSION"))];
+
+pub fn load_rules_from_pref(
+    pref: &Pref,
+    network: &Network,
+    base_dir: &Path,
+) -> Result<Vec<rules::Rule>> {
     let mut all_rules = Vec::new();
     if pref.ruleset.as_ref().map(|r| r.enabled).unwrap_or(false) {
         for entry in &pref.rulesets {
             let path = resolve_path(base_dir, &entry.import);
-            let mut loaded = rules::load_rules(&path, base_dir)?;
+            let mut loaded = rules::load_rules_with_fetcher(&path, base_dir, |url| {
+                fetch_ruleset_text(network, url)
+            })?;
             all_rules.append(&mut loaded);
         }
     }
     Ok(rules::reorder_rules_domain_before_ip(&all_rules))
+}
+
+fn fetch_ruleset_text(network: &Network, url: &str) -> Result<String> {
+    let parsed = Url::parse(url)
+        .with_context(|| format!("invalid ruleset url {url}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        bail!("unsupported ruleset url scheme {}", parsed.scheme());
+    }
+
+    let fetch = async {
+        network
+            .get_or_fetch_with(&parsed, &RULESET_USER_AGENTS, false, |text| {
+                Ok(text.to_string())
+            })
+            .await
+    };
+
+    let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch))
+    } else {
+        let runtime = tokio::runtime::Runtime::new()
+            .context("failed to create tokio runtime")?;
+        runtime.block_on(fetch)
+    };
+
+    result
+        .map_err(|err| anyhow!(err.to_string()))
+        .with_context(|| format!("failed to fetch ruleset {}", url))
 }

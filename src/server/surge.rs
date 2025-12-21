@@ -102,7 +102,7 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
         out.push('\n');
     }
 
-    let rules = load_rules_from_pref(pref, &state.base_dir)?;
+    let rules = load_rules_from_pref(pref, &state.network, &state.base_dir)?;
     let rendered_rules: Vec<String> = rules
         .iter()
         .map(|r| {
