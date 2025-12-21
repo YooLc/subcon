@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, process::Command};
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let web_dir = manifest_dir.join("src").join("web");
+    let out_index = web_dir.join("out").join("index.html");
 
     if !web_dir.exists() {
         return;
@@ -12,6 +13,16 @@ fn main() {
     println!("cargo:rerun-if-changed=src/web");
     println!("cargo:rerun-if-changed=src/web/package.json");
     println!("cargo:rerun-if-changed=src/web/pnpm-lock.yaml");
+
+    if env::var_os("SUBCON_WEB_SKIP").is_some() {
+        if !out_index.exists() {
+            panic!(
+                "SUBCON_WEB_SKIP is set but {} is missing. Run `pnpm -C src/web build` first.",
+                out_index.display()
+            );
+        }
+        return;
+    }
 
     run_cmd("pnpm", &["install", "--frozen-lockfile"], &web_dir);
     run_cmd("pnpm", &["build"], &web_dir);

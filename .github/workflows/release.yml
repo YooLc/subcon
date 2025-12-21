@@ -20,6 +20,8 @@ permissions:
 env:
   APP_NAME: subcon
   CROSS_VERSION: v0.2.5
+  NODE_VERSION: 20
+  PNPM_VERSION: 10.15.1
   RUST_BACKTRACE: 1
 
 jobs:
@@ -137,6 +139,17 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
       - name: Install cross
         if: matrix.os == 'ubuntu-latest' && matrix.use_cross
         shell: bash
@@ -149,16 +162,16 @@ jobs:
           tar xf cross-x86_64-unknown-linux-musl.tar.gz
           echo "CARGO=cross" >> "$GITHUB_ENV"
 
-      - name: Configure cross image (riscv64 musl)
-        if: matrix.os == 'ubuntu-latest' && matrix.target == 'riscv64gc-unknown-linux-musl'
+      - name: Build web assets
         shell: bash
         run: |
-          cat > Cross.toml <<'EOF'
-          [target.riscv64gc-unknown-linux-musl]
-          image = "ghcr.io/cross-rs/riscv64gc-unknown-linux-musl:main"
-          EOF
+          pnpm -C src/web install --frozen-lockfile
+          pnpm -C src/web build
 
       - name: Build (release)
+        env:
+          SUBCON_WEB_SKIP: "1"
+          CROSS_CONTAINER_OPTS: "--env SUBCON_WEB_SKIP=1"
         shell: bash
         run: |
           # Prefer fully static binaries on Linux-musl for maximum compatibility.
@@ -239,6 +252,17 @@ jobs:
           toolchain: stable
           target: ${{ env.TARGET }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
       - name: Install cross
         shell: bash
         run: |
@@ -250,7 +274,16 @@ jobs:
           tar xf cross-x86_64-unknown-linux-musl.tar.gz
           echo "CARGO=cross" >> "$GITHUB_ENV"
 
+      - name: Build web assets
+        shell: bash
+        run: |
+          pnpm -C src/web install --frozen-lockfile
+          pnpm -C src/web build
+
       - name: Build binary (release)
+        env:
+          SUBCON_WEB_SKIP: "1"
+          CROSS_CONTAINER_OPTS: "--env SUBCON_WEB_SKIP=1"
         shell: bash
         run: |
           cargo_cmd="${CARGO:-cargo}"
