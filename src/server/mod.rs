@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -9,7 +9,6 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
-use reqwest::header::USER_AGENT;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower_http::classify::ServerErrorsFailureClass;
@@ -17,6 +16,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 
 use crate::config::{Pref, load_pref};
+use crate::network::Network;
 use crate::proxy;
 use crate::schema::SchemaRegistry;
 use crate::server::util::{gather_insert_paths, gather_profile_paths, resolve_path};
@@ -50,10 +50,7 @@ pub async fn run() -> Result<()> {
     let schema_path = resolve_path(&base_dir, schema_rel);
 
     let registry = Arc::new(SchemaRegistry::with_builtin(&schema_path)?);
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .context("failed to build http client")?;
+    let network = Network::new(&pref.network, &base_dir)?;
 
     let mut targets: HashMap<String, Arc<dyn TargetRenderer>> = HashMap::new();
     targets.insert("clash".to_string(), Arc::new(clash::ClashRenderer));
@@ -64,7 +61,7 @@ pub async fn run() -> Result<()> {
         registry,
         targets,
         base_dir,
-        http_client,
+        network,
     };
 
     let app = Router::new()
@@ -135,7 +132,7 @@ pub struct AppState {
     pub registry: Arc<SchemaRegistry>,
     pub targets: HashMap<String, Arc<dyn TargetRenderer>>,
     pub base_dir: PathBuf,
-    pub http_client: reqwest::Client,
+    pub network: Network,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,7 +166,6 @@ async fn handle_sub(
         .zip(state.pref.common.api_access_token.as_ref())
         .map(|(provided, expected)| provided == expected)
         .unwrap_or(false);
-
     info!(
         target = %params.target,
         include_insert,
@@ -203,8 +199,8 @@ async fn load_proxies_for_request(
     let registry = &state.registry;
 
     let mut proxies = if let Some(raw_url) = url {
-        let parsed_url = parse_subscription_url(raw_url, &pref.common.allowed_domain)?;
-        fetch_proxies_from_url(&state.http_client, registry, &parsed_url).await?
+        let parsed_url = parse_subscription_url(raw_url)?;
+        fetch_proxies_from_url(&state.network, registry, &parsed_url).await?
     } else {
         let profiles =
             gather_profile_paths(pref, include_insert, &state.base_dir).map_err(ApiError::internal)?;
@@ -235,7 +231,6 @@ async fn load_proxies_for_request(
 
 fn parse_subscription_url(
     raw: &str,
-    allowed_domains: &[String],
 ) -> Result<reqwest::Url, ApiError> {
     let trimmed = raw.trim();
     let url = reqwest::Url::parse(trimmed).map_err(|err| {
@@ -247,82 +242,26 @@ fn parse_subscription_url(
             format!("unsupported url scheme {}", url.scheme()),
         ));
     }
-    let host = url
-        .host_str()
+    url.host_str()
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "url missing host"))?;
-    if allowed_domains.is_empty() {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "allowed-domain list is empty",
-        ));
-    }
-    let host_lower = host.to_ascii_lowercase();
-    let allowed = allowed_domains
-        .iter()
-        .any(|domain| domain.eq_ignore_ascii_case(&host_lower));
-    if !allowed {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            format!("domain not allowed: {host}"),
-        ));
-    }
     Ok(url)
 }
 
 async fn fetch_proxies_from_url(
-    client: &reqwest::Client,
+    network: &Network,
     registry: &SchemaRegistry,
     url: &reqwest::Url,
 ) -> Result<Vec<crate::proxy::Proxy>, ApiError> {
-    let mut last_error = None;
-
-    for ua in SUBSCRIPTION_USER_AGENTS {
-        let response = client
-            .get(url.clone())
-            .header(USER_AGENT, ua)
-            .send()
-            .await;
-
-        let response = match response {
-            Ok(resp) => resp,
-            Err(err) => {
-                last_error = Some(format!("request failed with UA {ua}: {err}"));
-                continue;
+    network
+        .get_or_fetch_with(url, &SUBSCRIPTION_USER_AGENTS, false, |text| {
+            let proxies = proxy::load_from_text(registry, text)?;
+            if proxies.is_empty() {
+                anyhow::bail!("no proxies found");
             }
-        };
-
-        let status = response.status();
-        if !status.is_success() {
-            last_error = Some(format!("status {status} with UA {ua}"));
-            continue;
-        }
-
-        let text = match response.text().await {
-            Ok(text) => text,
-            Err(err) => {
-                last_error = Some(format!("failed to read response with UA {ua}: {err}"));
-                continue;
-            }
-        };
-
-        match proxy::load_from_text(registry, &text) {
-            Ok(proxies) if !proxies.is_empty() => return Ok(proxies),
-            Ok(_) => {
-                last_error = Some(format!("no proxies found with UA {ua}"));
-            }
-            Err(err) => {
-                last_error = Some(format!("failed to parse response with UA {ua}: {err}"));
-            }
-        }
-    }
-
-    Err(ApiError::new(
-        StatusCode::BAD_GATEWAY,
-        format!(
-            "failed to fetch subscription: {}",
-            last_error.unwrap_or_else(|| "unknown error".to_string())
-        ),
-    ))
+            Ok(proxies)
+        })
+        .await
+        .map_err(|err| ApiError::new(err.status, err.to_string()))
 }
 
 async fn handle_404(uri: axum::http::Uri) -> impl IntoResponse {

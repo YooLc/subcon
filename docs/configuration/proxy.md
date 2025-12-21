@@ -43,7 +43,7 @@ protocols include:
 
 ## Remote subscriptions
 To pull a subscription URL, pass `url` and ensure the hostname is listed in
-`common.allowed_domain`.
+`network.allowed_domain`.
 
 ```bash
 curl "http://127.0.0.1:25500/sub?target=clash&url=https://example.com/sub"

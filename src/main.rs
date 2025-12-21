@@ -5,6 +5,7 @@ mod schema;
 mod proxy;
 mod rules;
 mod config;
+mod network;
 mod server;
 
 use anyhow::Result;

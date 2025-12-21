@@ -27,7 +27,7 @@ graph TD
 ## Configuration checklist
 - Ensure `common.schema` points to `schema/`.
 - Point base templates to `conf/base/*`.
-- Set `common.allowed_domain` if you will use `url`.
+- Set `network.allowed_domain` if you will use `url`.
 - Verify `server.listen` and `server.port`.
 
 !!! note

@@ -43,7 +43,7 @@ graph LR
 
 !!! danger "Security note"
 
-    To prevent abuse and ensure security, remote subscription `url` requests are restricted by `common.allowed_domain`.
+    To prevent abuse and ensure security, remote subscription `url` requests are restricted by `network.allowed_domain`.
 
 ## Request parameters
 | Name | Required | Description |

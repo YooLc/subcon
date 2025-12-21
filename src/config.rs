@@ -15,6 +15,8 @@ pub struct Pref {
     pub rulesets: Vec<RulesetImport>,
     #[serde(default)]
     pub managed_config: ManagedConfig,
+    #[serde(default)]
+    pub network: NetworkConfig,
     pub server: Server,
     #[serde(default)]
     pub node_pref: NodePref,
@@ -25,8 +27,6 @@ pub struct Common {
     pub api_access_token: Option<String>,
     #[serde(default)]
     pub default_url: Vec<String>,
-    #[serde(default)]
-    pub allowed_domain: Vec<String>,
     #[serde(default)]
     pub enable_insert: bool,
     #[serde(default)]
@@ -99,6 +99,41 @@ fn default_managed_config_interval() -> u64 {
 
 fn default_managed_config_strict() -> bool {
     false
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct NetworkConfig {
+    #[serde(default = "default_network_enable")]
+    pub enable: bool,
+    #[serde(default = "default_network_dir")]
+    pub dir: String,
+    #[serde(default = "default_network_ttl_seconds")]
+    pub ttl_seconds: u64,
+    #[serde(default)]
+    pub allowed_domain: Vec<String>,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            enable: default_network_enable(),
+            dir: default_network_dir(),
+            ttl_seconds: default_network_ttl_seconds(),
+            allowed_domain: Vec::new(),
+        }
+    }
+}
+
+fn default_network_enable() -> bool {
+    true
+}
+
+fn default_network_dir() -> String {
+    "conf/cache".to_string()
+}
+
+fn default_network_ttl_seconds() -> u64 {
+    86_400
 }
 
 pub fn load_pref(path: impl AsRef<Path>) -> Result<Pref> {

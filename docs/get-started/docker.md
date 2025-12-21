@@ -47,6 +47,6 @@ curl "http://127.0.0.1:25500/sub?target=clash"
 ```
 
 ## Security checklist
-- Keep `common.allowed_domain` minimal.
+- Keep `network.allowed_domain` minimal.
 - Rotate `common.api_access_token` if it leaks.
 - Avoid binding to public interfaces without access controls.

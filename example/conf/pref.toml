@@ -5,7 +5,6 @@ schema = "schema"
 clash_rule_base = "conf/base/clash.yml"
 surge_rule_base = "conf/base/surge.cfg"
 default_url = []
-allowed_domain = []
 enable_insert = false
 insert_url = []
 prepend_insert_url = false
@@ -20,6 +19,12 @@ write_managed_config = false
 managed_config_prefix = ""
 config_update_interval = 86400
 config_update_strict = false
+
+[network]
+enable = true
+dir = "conf/cache"
+ttl_seconds = 86400
+allowed_domain = []
 
 [[custom_groups]]
 import = "conf/snippets/groups.toml"

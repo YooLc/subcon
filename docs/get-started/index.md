@@ -35,7 +35,7 @@ At minimum, make sure these fields are set in `conf/pref.toml`:
 - `common.clash_rule_base`
 - `common.surge_rule_base`
 - `common.default_url` or a plan to pass `url`
-- `common.allowed_domain` when using remote subscriptions
+- `network.allowed_domain` when using remote subscriptions
 
 ??? example "Minimal configuration scaffold"
     ```toml
@@ -44,6 +44,8 @@ At minimum, make sure these fields are set in `conf/pref.toml`:
     clash_rule_base = "conf/base/clash.yml"
     surge_rule_base = "conf/base/surge.cfg"
     default_url = ["conf/profiles/example.yaml"]
+
+    [network]
     allowed_domain = ["example.com"]
 
     [server]

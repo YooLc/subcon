@@ -16,7 +16,6 @@ schema = "schema"
 clash_rule_base = "conf/base/clash.yml"
 surge_rule_base = "conf/base/surge.cfg"
 default_url = ["conf/profiles/example.yaml"]
-allowed_domain = ["example.com"]
 api_access_token = "change-me"
 enable_insert = true
 insert_url = ["conf/profiles/extra.yaml"]
@@ -32,6 +31,12 @@ write_managed_config = true
 managed_config_prefix = "https://sub.example.com"
 config_update_interval = 86400
 config_update_strict = false
+
+[network]
+enable = true
+dir = "conf/cache"
+ttl_seconds = 86400
+allowed_domain = ["example.com"]
 
 [[custom_groups]]
 import = "conf/snippets/groups.toml"
@@ -54,15 +59,11 @@ port = 25500
 | `common.clash_rule_base` | string | Base Clash config template. |
 | `common.surge_rule_base` | string | Base Surge config template. |
 | `common.default_url` | string list | Local profile paths for default requests. |
-| `common.allowed_domain` | string list | Allowlist for remote `url` fetch. |
 | `common.api_access_token` | string | Token required to include inserts. |
 | `common.enable_insert` | bool | Enable insert profile behavior. |
 | `common.insert_url` | string list | Profiles to inject with a valid token. |
 | `common.prepend_insert_url` | bool | Prepend inserts before defaults. |
 | `common.sort` | bool | Sort proxies by name before rendering. |
-
-!!! warning
-    If `common.allowed_domain` is empty, all `url` requests are rejected.
 
 ## Server settings
 | Key | Type | Purpose |
@@ -89,6 +90,22 @@ If enabled, Subcon writes a `#!MANAGED-CONFIG` line for Surge outputs.
 | `config_update_interval` | integer | Refresh interval in seconds. |
 | `config_update_strict` | bool | Whether Surge enforces strict updates. |
 
+## Network settings
+Network settings control remote fetch behavior, caching, and allowlists.
+The cache directory is cleared on every startup, so do not place important files there.
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `network.enable` | bool | Enable cache reads and writes (defaults to true). |
+| `network.dir` | string | Directory for cached responses (relative to project root unless absolute). |
+| `network.ttl_seconds` | integer | Default cache TTL in seconds (default 86400). |
+| `network.allowed_domain` | string list | Allowlist for remote `url` fetch. |
+
+When `network.enable` is false, Subcon always fetches remote content and skips cache reads and writes.
+
+!!! warning
+    If `network.allowed_domain` is empty, all `url` requests are rejected.
+
 ## Groups and rulesets
 Use TOML imports to keep large config files manageable.
 
@@ -101,12 +118,12 @@ Use TOML imports to keep large config files manageable.
     ```toml
     [common]
     default_url = ["conf/profiles/example.yaml"]
-    allowed_domain = []
+    # network.allowed_domain can stay empty when not using remote URLs.
     ```
 
 === "Remote allowed"
     Use a remote subscription URL.
     ```toml
-    [common]
+    [network]
     allowed_domain = ["example.com"]
     ```
