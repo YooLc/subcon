@@ -133,5 +133,5 @@ pub fn load_rules_from_pref(pref: &Pref, base_dir: &Path) -> Result<Vec<rules::R
             all_rules.append(&mut loaded);
         }
     }
-    Ok(all_rules)
+    Ok(rules::reorder_rules_domain_before_ip(&all_rules))
 }

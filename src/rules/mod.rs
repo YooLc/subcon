@@ -154,6 +154,64 @@ pub fn load_rules(
     Ok(rules)
 }
 
+const IP_RULE_TYPES: [&str; 9] = [
+    "IP-CIDR",
+    "IP-CIDR6",
+    "IP-SUFFIX",
+    "IP-ASN",
+    "GEOIP",
+    "SRC-GEOIP",
+    "SRC-IP-ASN",
+    "SRC-IP-CIDR",
+    "SRC-IP-SUFFIX",
+];
+
+const DOMAIN_RULE_TYPES: [&str; 6] = [
+    "DOMAIN",
+    "DOMAIN-SUFFIX",
+    "DOMAIN-KEYWORD",
+    "DOMAIN-WILDCARD",
+    "DOMAIN-REGEX",
+    "GEOSITE",
+];
+
+pub fn reorder_rules_domain_before_ip(rules: &[Rule]) -> Vec<Rule> {
+    let mut ip_rules = Vec::new();
+    let mut domain_rules = Vec::new();
+
+    for rule in rules {
+        if is_ip_rule(rule) {
+            ip_rules.push(rule.clone());
+        } else if is_domain_rule(rule) {
+            domain_rules.push(rule.clone());
+        }
+    }
+
+    if ip_rules.is_empty() || domain_rules.is_empty() {
+        return rules.to_vec();
+    }
+
+    let mut ip_iter = ip_rules.into_iter();
+    let mut domain_iter = domain_rules.into_iter();
+    let mut output = Vec::with_capacity(rules.len());
+
+    for rule in rules {
+        if is_ip_rule(rule) || is_domain_rule(rule) {
+            if let Some(next) = domain_iter.next() {
+                output.push(next);
+            } else if let Some(next) = ip_iter.next() {
+                output.push(next);
+            } else {
+                output.push(rule.clone());
+            }
+        } else {
+            output.push(rule.clone());
+        }
+    }
+
+    output
+}
+
 fn parse_rule_line(line: &str, group: &str) -> Result<Option<Rule>> {
     let stripped = if let Some(idx) = line.find("//") {
         &line[..idx]
@@ -244,6 +302,18 @@ fn is_supported_rule_type(raw: &str) -> bool {
     }
 }
 
+fn is_ip_rule(rule: &Rule) -> bool {
+    IP_RULE_TYPES
+        .iter()
+        .any(|ty| ty.eq_ignore_ascii_case(&rule.rule_type.0))
+}
+
+fn is_domain_rule(rule: &Rule) -> bool {
+    DOMAIN_RULE_TYPES
+        .iter()
+        .any(|ty| ty.eq_ignore_ascii_case(&rule.rule_type.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +343,34 @@ mod tests {
     fn parse_type_only_rule() {
         let rule = parse_rule_line("FINAL", "Fallback").unwrap();
         assert!(rule.is_none(), "unsupported rule type should be skipped");
+    }
+
+    #[test]
+    fn reorder_domain_before_ip_preserves_others() {
+        let rule_set = Rule {
+            rule_type: RuleType::new("RULE-SET"),
+            content: Some("ruleset".to_string()),
+            group: "G".to_string(),
+            flags: RuleFlags::default(),
+        };
+        let domain = Rule {
+            rule_type: RuleType::new("DOMAIN-SUFFIX"),
+            content: Some("example.com".to_string()),
+            group: "G".to_string(),
+            flags: RuleFlags::default(),
+        };
+        let ip = Rule {
+            rule_type: RuleType::new("IP-CIDR"),
+            content: Some("1.1.1.1/32".to_string()),
+            group: "G".to_string(),
+            flags: RuleFlags::default(),
+        };
+
+        let rules = vec![ip.clone(), rule_set.clone(), domain.clone()];
+        let reordered = reorder_rules_domain_before_ip(&rules);
+
+        assert_eq!(reordered[0], domain);
+        assert_eq!(reordered[1], rule_set);
+        assert_eq!(reordered[2], ip);
     }
 }
