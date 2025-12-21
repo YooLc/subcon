@@ -4,6 +4,9 @@ icon: lucide/list
 
 # Changelog
 
+## 0.2.1
+- Fix: Surge DST-PORT rules are now emitted as DEST-PORT.
+
 ## 0.2.0
 Highlights since 0.1.0:
 

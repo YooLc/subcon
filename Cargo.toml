@@ -1,6 +1,6 @@
 [package]
 name = "subcon"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Subscription converter server for Clash and Surge configs"
 license = "MIT"
@@ -19,18 +19,49 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 tower-http = { version = "0.6.8", features = ["trace"] }
 clap = { version = "4.5.53", features = ["derive"] }
-reqwest = { version = "0.12.15", default-features = false, features = ["gzip", "rustls-tls"] }
+reqwest = { version = "0.12.15", default-features = false, features = [
+  "gzip",
+  "rustls-tls",
+] }
 sha2 = "0.10.9"
 
 [package.metadata.deb]
 maintainer = "YooLc"
 copyright = "© YooLc"
 assets = [
-  ["example/conf/pref.toml", "etc/subcon/conf/pref.toml", "644"],
-  ["example/conf/base/*", "etc/subcon/conf/base", "644"],
-  ["example/conf/profiles/*", "etc/subcon/conf/profiles", "644"],
-  ["example/conf/rules/*", "etc/subcon/conf/rules", "644"],
-  ["example/conf/snippets/*", "etc/subcon/conf/snippets", "644"],
-  ["schema/*.yaml", "etc/subcon/schema", "644"],
-  ["schema/include/*", "etc/subcon/schema/include", "644"],
+  [
+    "example/conf/pref.toml",
+    "etc/subcon/conf/pref.toml",
+    "644",
+  ],
+  [
+    "example/conf/base/*",
+    "etc/subcon/conf/base",
+    "644",
+  ],
+  [
+    "example/conf/profiles/*",
+    "etc/subcon/conf/profiles",
+    "644",
+  ],
+  [
+    "example/conf/rules/*",
+    "etc/subcon/conf/rules",
+    "644",
+  ],
+  [
+    "example/conf/snippets/*",
+    "etc/subcon/conf/snippets",
+    "644",
+  ],
+  [
+    "schema/*.yaml",
+    "etc/subcon/schema",
+    "644",
+  ],
+  [
+    "schema/include/*",
+    "etc/subcon/schema/include",
+    "644",
+  ],
 ]

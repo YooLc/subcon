@@ -113,6 +113,9 @@ fn render_surge(args: RenderArgs<'_>) -> Result<String> {
             } else if let Some(rest) = line.strip_prefix("SRC-IP-CIDR,") {
                 line = format!("IP-CIDR,{rest},no-resolve");
             }
+            if line.to_ascii_uppercase().starts_with("DST-PORT") {
+                line = format!("DEST-PORT{}", &line["DST-PORT".len()..]);
+            }
             line
         })
         .collect();

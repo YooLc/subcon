@@ -67,3 +67,4 @@ graph LR
 ## Next steps
 - [Get Started](get-started/index.md)
 - [Configuration](configuration/index.md)
+- [Changelog](changelog.md)
