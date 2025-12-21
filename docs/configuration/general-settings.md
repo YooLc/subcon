@@ -4,8 +4,8 @@ icon: lucide/sliders
 
 # General Settings
 
-`conf/pref.toml` defines global behavior for Subcon. Paths are resolved from
-the project root.
+`conf/pref.toml` defines global behavior for Subcon. Paths are resolved relative
+to the working directory, and fall back to `/etc/subcon` when missing.
 
 ## Pref structure
 ```toml
@@ -97,7 +97,7 @@ The cache directory is cleared on every startup, so do not place important files
 | Key | Type | Purpose |
 | --- | --- | --- |
 | `network.enable` | bool | Enable cache reads and writes (defaults to true). |
-| `network.dir` | string | Directory for cached responses (relative to project root unless absolute). |
+| `network.dir` | string | Directory for cached responses (relative to the working directory, with `/etc/subcon` fallback, unless absolute). |
 | `network.ttl_seconds` | integer | Default cache TTL in seconds (default 86400). |
 | `network.allowed_domain` | string list | Allowlist for remote `url` fetch. |
 

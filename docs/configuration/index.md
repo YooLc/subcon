@@ -4,7 +4,8 @@ icon: lucide/settings
 
 # Configuration
 
-Subcon reads `conf/pref.toml` on startup (or the path supplied by `--pref`).
+Subcon reads `conf/pref.toml` on startup (or the path supplied by `--pref`). When
+a relative path is missing, Subcon also checks `/etc/subcon`.
 Most behavior is driven by three layers: config, profiles, and schema.
 
 ``` mermaid
@@ -23,6 +24,8 @@ graph TD
 | `conf/snippets/` | Proxy groups and rulesets. |
 | `conf/rules/` | Rule list files referenced by rulesets. |
 | `schema/` | Protocol schemas and target mapping. |
+
+On Debian packages, these directories are installed under `/etc/subcon`.
 
 ## Configuration checklist
 - Ensure `common.schema` points to `schema/`.

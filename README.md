@@ -6,6 +6,9 @@
 
 Subscription converter server that renders Clash and Surge configs from local profiles or remote subscriptions. Conversion logic is driven by `schema/` and `conf/` configs, so you can tune behavior without recompiling the project.
 
+## Documentation
+[Documentation](docs/index.md)
+
 ## Support Matrix
 | Software | Import | Export | Notes |
 | -- | -- | -- | -- |
