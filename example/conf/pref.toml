@@ -24,7 +24,7 @@ config_update_strict = false
 enable = true
 dir = "conf/cache"
 ttl_seconds = 86400
-allowed_domain = []
+allowed_domain = ["ruleset.skk.moe"]
 
 [[custom_groups]]
 import = "conf/snippets/groups.toml"

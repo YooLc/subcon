@@ -1,11 +1,103 @@
 [[rulesets]]
-group = "Direct"
-ruleset = "conf/rules/direct.list"
+group = "🧲 AI Service"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/ai.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/apple_intelligence.txt",
+]
 
 [[rulesets]]
-group = "Default"
-ruleset = "conf/rules/proxy.list"
+group = "🎬 港澳流媒体"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/stream_hk.txt",
+  "https://ruleset.skk.moe/Clash/ip/stream_hk.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/stream_biliintl.txt",
+  "https://ruleset.skk.moe/Clash/ip/stream_biliintl.txt",
+]
 
 [[rulesets]]
-group = "Default"
-ruleset = "[]FINAL"
+group = "🎬 台湾流媒体"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/stream_tw.txt",
+  "https://ruleset.skk.moe/Clash/ip/stream_tw.txt",
+]
+
+[[rulesets]]
+group = "🎬 日本流媒体"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/stream_jp.txt",
+  "https://ruleset.skk.moe/Clash/ip/stream_jp.txt",
+]
+
+[[rulesets]]
+group = "⚠️ 区域限制"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/stream.txt",
+  "https://ruleset.skk.moe/Clash/ip/stream.txt",
+]
+
+[[rulesets]]
+group = "🍎 苹果服务"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/apple_services.txt",
+  "https://ruleset.skk.moe/Clash/ip/apple_services.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/apple_cdn.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/apple_cn.txt",
+]
+
+[[rulesets]]
+group = "Ⓜ️ 微软服务"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/microsoft.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/microsoft_cdn.txt",
+]
+
+[[rulesets]]
+group = "✅ 国内服务"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/domestic.txt",
+  "https://ruleset.skk.moe/Clash/ip/domestic.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/neteasemusic.txt",
+  "https://ruleset.skk.moe/Clash/ip/neteasemusic.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/sogouinput.txt",
+]
+
+[[rulesets]]
+group = "🎯 全球直连"
+ruleset = [
+  "[]GEOIP,CN",
+  "https://ruleset.skk.moe/Clash/non_ip/direct.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/lan.txt",
+  "https://ruleset.skk.moe/Clash/ip/lan.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/cdn.txt",
+  "https://ruleset.skk.moe/Clash/ip/cdn.txt",
+
+]
+
+[[rulesets]]
+group = "🔰 节点选择"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/global.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/global_plus.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/telegram.txt",
+  "https://ruleset.skk.moe/Clash/ip/telegram.txt",
+  "https://ruleset.skk.moe/Clash/ip/telegram_asn.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/my_proxy.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/my_plus.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/gitlab.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/my_git.txt",
+]
+
+[[rulesets]]
+group = "🛑 全球拦截"
+ruleset = [
+  "https://ruleset.skk.moe/Clash/non_ip/reject.txt",
+  "https://ruleset.skk.moe/Clash/ip/reject.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/reject-drop.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/reject-no-drop.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/reject-url-regex.txt",
+  "https://ruleset.skk.moe/Clash/non_ip/my_reject.txt",
+]
+
+[[rulesets]]
+group = "🐟 漏网之鱼"
+ruleset = ["[]FINAL"]
