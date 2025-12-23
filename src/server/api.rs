@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/groups", get(get_groups))
         .route("/cache", get(get_cache))
         .route("/control/reload", post(control_reload))
+        .route("/control/token", post(control_set_api_token))
         .route("/control/restart", post(control_restart))
         .layer(axum::middleware::from_fn_with_state(state, api_auth))
         .layer(axum::middleware::from_fn(api_no_cache))
@@ -53,6 +54,7 @@ struct ConfigResponse {
     rules_dir: String,
     rulesets: Vec<String>,
     managed_base_url: Option<String>,
+    api_auth_required: bool,
     server: ServerInfo,
 }
 
@@ -87,6 +89,11 @@ struct FileContentResponse {
 #[derive(Deserialize)]
 struct UpdateFileRequest {
     content: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateApiTokenRequest {
+    token: String,
 }
 
 #[derive(Serialize)]
@@ -164,8 +171,11 @@ async fn api_auth(
 ) -> Response {
     let runtime = state.runtime.read().await.clone();
     let expected = runtime.pref.common.api_access_token.as_deref().unwrap_or("");
-    if expected.is_empty() {
-        return ApiError::new(StatusCode::FORBIDDEN, "api token not configured").into_response();
+    if expected.trim().is_empty() {
+        if !is_same_origin(req.headers()) {
+            return ApiError::new(StatusCode::FORBIDDEN, "origin not allowed").into_response();
+        }
+        return next.run(req).await;
     }
     let provided = extract_token(req.headers()).unwrap_or_default();
     if provided != expected {
@@ -276,6 +286,12 @@ async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigResponse
         listen: pref.server.listen.clone(),
         port: pref.server.port,
     };
+    let api_auth_required = pref
+        .common
+        .api_access_token
+        .as_deref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
 
     Ok(Json(ConfigResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -286,6 +302,7 @@ async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigResponse
         rules_dir: rules_dir.display().to_string(),
         rulesets,
         managed_base_url: pref.managed_config.base_url.clone(),
+        api_auth_required,
         server,
     }))
 }
@@ -523,6 +540,48 @@ async fn control_reload(State(state): State<AppState>) -> Result<Json<ControlRes
     }))
 }
 
+async fn control_set_api_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateApiTokenRequest>,
+) -> Result<Json<ControlResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let expected = runtime.pref.common.api_access_token.as_deref().unwrap_or("");
+    if expected.trim().is_empty() {
+        if !is_same_origin(&headers) {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "origin not allowed"));
+        }
+    } else {
+        let provided = extract_token(&headers).unwrap_or_default();
+        if provided != expected {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "invalid api token"));
+        }
+        if !is_same_origin(&headers) {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, "origin not allowed"));
+        }
+    }
+
+    let token = body.token.trim();
+    if token.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "token is required"));
+    }
+    if !token_has_valid_chars(token) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "token contains invalid characters",
+        ));
+    }
+    update_pref_api_token(&state.pref_path, token).await?;
+    let runtime = build_runtime(&state.pref_path, &state.base_dir).map_err(ApiError::internal)?;
+    let mut guard = state.runtime.write().await;
+    *guard = runtime;
+    info!("api access token updated");
+    Ok(Json(ControlResponse {
+        ok: true,
+        message: "api access token updated".to_string(),
+    }))
+}
+
 async fn control_restart(State(_state): State<AppState>) -> Result<Json<ControlResponse>, ApiError> {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -533,6 +592,39 @@ async fn control_restart(State(_state): State<AppState>) -> Result<Json<ControlR
         ok: true,
         message: "restart requested".to_string(),
     }))
+}
+
+async fn update_pref_api_token(path: &Path, token: &str) -> Result<(), ApiError> {
+    let text = fs::read_to_string(path).await.map_err(ApiError::internal)?;
+    let mut value: toml::Value = toml::from_str(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))
+        .map_err(ApiError::internal)?;
+    let root = value.as_table_mut().ok_or_else(|| {
+        ApiError::new(StatusCode::BAD_REQUEST, "pref root must be a table")
+    })?;
+    let common = root.get_mut("common").ok_or_else(|| {
+        ApiError::new(StatusCode::BAD_REQUEST, "`[common]` section not found")
+    })?;
+    let common_table = common.as_table_mut().ok_or_else(|| {
+        ApiError::new(StatusCode::BAD_REQUEST, "`common` must be a table")
+    })?;
+    common_table.insert(
+        "api_access_token".to_string(),
+        toml::Value::String(token.to_string()),
+    );
+    let output = toml::to_string_pretty(&value).map_err(ApiError::internal)?;
+    fs::write(path, output).await.map_err(ApiError::internal)?;
+    Ok(())
+}
+
+const TOKEN_ALLOWED: &str =
+    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*_-+=";
+
+fn token_has_valid_chars(token: &str) -> bool {
+    token
+        .as_bytes()
+        .iter()
+        .all(|byte| TOKEN_ALLOWED.as_bytes().contains(byte))
 }
 
 fn resolve_profiles_dir(base_dir: &Path) -> PathBuf {

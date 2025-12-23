@@ -14,11 +14,14 @@ export function readAuthConfig(): AuthConfig | null {
     return null;
   }
   try {
-    const parsed = JSON.parse(raw) as AuthConfig;
-    if (!parsed.baseUrl || !parsed.token) {
+    const parsed = JSON.parse(raw) as Partial<AuthConfig>;
+    if (!parsed.baseUrl) {
       return null;
     }
-    return parsed;
+    return {
+      baseUrl: parsed.baseUrl,
+      token: typeof parsed.token === "string" ? parsed.token : "",
+    };
   } catch {
     return null;
   }

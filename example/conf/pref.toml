@@ -1,33 +1,34 @@
 version = 1
 
 [common]
-schema = "schema"
+api_access_token = ""
 clash_rule_base = "conf/base/clash.yml"
-surge_rule_base = "conf/base/surge.cfg"
 default_url = []
 enable_insert = false
 insert_url = []
 prepend_insert_url = false
+schema = "schema"
 sort = true
-
-[node_pref]
-udp = true
-tfo = false
-
-[managed_config]
-write_managed_config = false
-managed_config_prefix = ""
-config_update_interval = 86400
-config_update_strict = false
-
-[network]
-enable = true
-dir = "conf/cache"
-ttl_seconds = 86400
-allowed_domain = ["ruleset.skk.moe"]
+surge_rule_base = "conf/base/surge.cfg"
 
 [[custom_groups]]
 import = "conf/snippets/groups.toml"
+
+[managed_config]
+config_update_interval = 86400
+config_update_strict = false
+managed_config_prefix = ""
+write_managed_config = false
+
+[network]
+allowed_domain = ["ruleset.skk.moe"]
+dir = "conf/cache"
+enable = true
+ttl_seconds = 86400
+
+[node_pref]
+tfo = false
+udp = true
 
 [ruleset]
 enabled = true

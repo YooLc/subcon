@@ -74,6 +74,9 @@ export function LoginScreen({
                 type="password"
                 autoComplete="current-password"
               />
+              <p className="text-xs text-muted-foreground">
+                Leave blank if api_access_token is not configured.
+              </p>
             </div>
             {error && (
               <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-600">

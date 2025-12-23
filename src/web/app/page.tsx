@@ -3,8 +3,11 @@
 import * as React from "react";
 import {
   CloudCog,
+  Copy,
   FileText,
   Layers3,
+  AlertTriangle,
+  RefreshCw,
   Rocket,
   ScrollText,
   Server,
@@ -16,8 +19,22 @@ import {
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CachePanel } from "@/components/studio/cache-panel";
 import { ConfigPanel } from "@/components/studio/config-panel";
 import { ControlPanel } from "@/components/studio/control-panel";
@@ -38,6 +55,50 @@ import {
 import type { ConfigResponse, Status } from "@/components/studio/types";
 import { cn } from "@/lib/utils";
 
+const TOKEN_LENGTH = 32;
+const TOKEN_SETS = {
+  upper: "ABCDEFGHJKLMNPQRSTUVWXYZ",
+  lower: "abcdefghijkmnopqrstuvwxyz",
+  digits: "23456789",
+  symbols: "!@#$%^&*_-+=",
+};
+
+function randomIndex(max: number): number {
+  if (max <= 0) {
+    return 0;
+  }
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function pickRandom(chars: string): string {
+  return chars[randomIndex(chars.length)] ?? "";
+}
+
+function generateStrongToken(length = TOKEN_LENGTH): string {
+  const targetLength = Math.max(length, 12);
+  const { upper, lower, digits, symbols } = TOKEN_SETS;
+  const all = `${upper}${lower}${digits}${symbols}`;
+  const chars = [
+    pickRandom(upper),
+    pickRandom(lower),
+    pickRandom(digits),
+    pickRandom(symbols),
+  ];
+  for (let i = chars.length; i < targetLength; i += 1) {
+    chars.push(pickRandom(all));
+  }
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomIndex(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
 export default function Home() {
   const [status, setStatus] = React.useState<Status | null>(null);
   const [auth, setAuth] = React.useState<AuthConfig | null>(null);
@@ -46,6 +107,15 @@ export default function Home() {
   const [authLoading, setAuthLoading] = React.useState(false);
   const [online, setOnline] = React.useState(false);
   const [config, setConfig] = React.useState<ConfigResponse | null>(null);
+  const [tokenPromptOpen, setTokenPromptOpen] = React.useState(false);
+  const [tokenPrompted, setTokenPrompted] = React.useState(false);
+  const [suggestedToken, setSuggestedToken] = React.useState("");
+  const [tokenSetting, setTokenSetting] = React.useState(false);
+  const [tokenSettingError, setTokenSettingError] = React.useState<string | null>(null);
+  const [tokenCopyStatus, setTokenCopyStatus] = React.useState<"idle" | "ok" | "error">(
+    "idle"
+  );
+  const [tokenCopyMessage, setTokenCopyMessage] = React.useState("");
   const [loadingConfig, setLoadingConfig] = React.useState(false);
   const [showBackToTop, setShowBackToTop] = React.useState(false);
   const [defaultServerUrl, setDefaultServerUrl] = React.useState("");
@@ -53,6 +123,63 @@ export default function Home() {
   const pushStatus = React.useCallback((next: Status) => {
     setStatus(next);
   }, []);
+
+  const regenerateToken = React.useCallback(() => {
+    setSuggestedToken(generateStrongToken());
+    setTokenSettingError(null);
+  }, []);
+
+  const applySuggestedToken = React.useCallback(async () => {
+    if (!auth) {
+      return;
+    }
+    const token = suggestedToken.trim();
+    if (!token) {
+      setTokenSettingError("Generated token is empty.");
+      return;
+    }
+    setTokenSetting(true);
+    setTokenSettingError(null);
+    try {
+      await fetchJson("/api/control/token", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      });
+      const nextAuth = { baseUrl: auth.baseUrl, token };
+      writeAuthConfig(nextAuth);
+      setAuth(nextAuth);
+      setTokenPromptOpen(false);
+      pushStatus({ kind: "ok", message: "api_access_token updated" });
+    } catch (err) {
+      setTokenSettingError(
+        err instanceof Error ? err.message : "Failed to update api_access_token."
+      );
+    } finally {
+      setTokenSetting(false);
+    }
+  }, [auth, pushStatus, suggestedToken]);
+
+  const handleCopyToken = React.useCallback(async () => {
+    const token = suggestedToken.trim();
+    if (!token) {
+      setTokenCopyStatus("error");
+      setTokenCopyMessage("No token to copy.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setTokenCopyStatus("error");
+      setTokenCopyMessage("Clipboard not available.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(token);
+      setTokenCopyStatus("ok");
+      setTokenCopyMessage("Copied to clipboard.");
+    } catch {
+      setTokenCopyStatus("error");
+      setTokenCopyMessage("Failed to copy token.");
+    }
+  }, [suggestedToken]);
 
   const loadConfig = React.useCallback(async () => {
     setLoadingConfig(true);
@@ -125,6 +252,41 @@ export default function Home() {
   }, [auth, loadConfig]);
 
   React.useEffect(() => {
+    if (!auth || !config) {
+      setTokenPromptOpen(false);
+      setTokenPrompted(false);
+      return;
+    }
+    if (config.api_auth_required) {
+      setTokenPromptOpen(false);
+      setTokenPrompted(false);
+      return;
+    }
+    if (!tokenPrompted) {
+      setSuggestedToken(generateStrongToken());
+      setTokenSettingError(null);
+      setTokenPromptOpen(true);
+      setTokenPrompted(true);
+    }
+  }, [auth, config, tokenPrompted]);
+
+  React.useEffect(() => {
+    setTokenCopyStatus("idle");
+    setTokenCopyMessage("");
+  }, [suggestedToken, tokenPromptOpen]);
+
+  React.useEffect(() => {
+    if (tokenCopyStatus === "idle") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setTokenCopyStatus("idle");
+      setTokenCopyMessage("");
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [tokenCopyStatus]);
+
+  React.useEffect(() => {
     if (!auth) {
       return;
     }
@@ -154,6 +316,94 @@ export default function Home() {
 
   return (
     <TooltipProvider delayDuration={250}>
+      <Dialog
+        open={tokenPromptOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTokenPromptOpen(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Secure your API</DialogTitle>
+            <DialogDescription>
+              <span className="inline-flex items-center gap-2 my-2">
+                <AlertTriangle className="h-6 w-6 text-amber-500" />
+                <span>
+                  <span className="font-semibold">api_access_token is not configured.</span><br />
+                  <span className="font-semibold">Set one now</span> to protect /api access.
+                </span>
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                Generated token
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  value={suggestedToken}
+                  readOnly
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="sm:flex-1"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Tooltip open={tokenCopyStatus !== "idle"}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="subtle"
+                        size="sm"
+                        onClick={handleCopyToken}
+                        disabled={tokenSetting}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copy
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {tokenCopyMessage || "Copy"}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    onClick={regenerateToken}
+                    disabled={tokenSetting}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Regenerate
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Save this token securely. You will need it for future logins.
+              </p>
+            </div>
+            {tokenSettingError && (
+              <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-600">
+                {tokenSettingError}
+              </div>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setTokenPromptOpen(false)}
+                disabled={tokenSetting}
+              >
+                Later
+              </Button>
+              <Button type="button" onClick={applySuggestedToken} disabled={tokenSetting}>
+                {tokenSetting ? "Setting..." : "Set token & reload"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="relative min-h-screen bg-background text-foreground">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div className="absolute -top-24 left-[6%] h-72 w-72 rounded-full bg-[radial-gradient(circle_at_center,rgba(20,184,166,0.35),transparent_70%)] blur-2xl animate-[drift_18s_ease-in-out_infinite]" />
@@ -352,13 +602,10 @@ export default function Home() {
                   setAuthError("Server URL must match this site for CSRF protection.");
                   return;
                 }
-                if (!token.trim()) {
-                  setAuthError("Token is required.");
-                  return;
-                }
+                const trimmedToken = token.trim();
                 setAuthLoading(true);
                 setAuthError(null);
-                const nextAuth = { baseUrl: normalized, token: token.trim() };
+                const nextAuth = { baseUrl: normalized, token: trimmedToken };
                 try {
                   await fetchJson<ConfigResponse>("/api/config", undefined, nextAuth);
                   writeAuthConfig(nextAuth);

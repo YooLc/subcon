@@ -35,6 +35,7 @@ export type ConfigResponse = {
   rules_dir: string;
   rulesets: string[];
   managed_base_url?: string | null;
+  api_auth_required: boolean;
   server: {
     listen: string;
     port: number;
