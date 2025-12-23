@@ -1,0 +1,13 @@
+[Unit]
+Description=Subcon subscription server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/subcon
+ExecStart=/usr/bin/subcon --pref /etc/subcon/conf/pref.toml
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
