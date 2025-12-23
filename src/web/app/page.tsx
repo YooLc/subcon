@@ -3,11 +3,8 @@
 import * as React from "react";
 import {
   CloudCog,
-  Copy,
   FileText,
   Layers3,
-  AlertTriangle,
-  RefreshCw,
   Rocket,
   ScrollText,
   Server,
@@ -19,27 +16,14 @@ import {
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { CachePanel } from "@/components/studio/cache-panel";
 import { ConfigPanel } from "@/components/studio/config-panel";
 import { ControlPanel } from "@/components/studio/control-panel";
 import { GroupsPanel } from "@/components/studio/groups-panel";
 import { LoginScreen } from "@/components/studio/login-screen";
+import { OobeScreen } from "@/components/studio/oobe-screen";
 import { ProfilesPanel } from "@/components/studio/profiles-panel";
 import { RulesPanel } from "@/components/studio/rules-panel";
 import { SchemaPanel } from "@/components/studio/schema-panel";
@@ -107,15 +91,13 @@ export default function Home() {
   const [authLoading, setAuthLoading] = React.useState(false);
   const [online, setOnline] = React.useState(false);
   const [config, setConfig] = React.useState<ConfigResponse | null>(null);
-  const [tokenPromptOpen, setTokenPromptOpen] = React.useState(false);
-  const [tokenPrompted, setTokenPrompted] = React.useState(false);
-  const [suggestedToken, setSuggestedToken] = React.useState("");
-  const [tokenSetting, setTokenSetting] = React.useState(false);
-  const [tokenSettingError, setTokenSettingError] = React.useState<string | null>(null);
-  const [tokenCopyStatus, setTokenCopyStatus] = React.useState<"idle" | "ok" | "error">(
-    "idle"
-  );
-  const [tokenCopyMessage, setTokenCopyMessage] = React.useState("");
+  const [loginStep, setLoginStep] = React.useState<"server" | "token">("server");
+  const [loginServerUrl, setLoginServerUrl] = React.useState("");
+  const [loginToken, setLoginToken] = React.useState("");
+  const [oobeActive, setOobeActive] = React.useState(false);
+  const [oobeToken, setOobeToken] = React.useState("");
+  const [oobeLoading, setOobeLoading] = React.useState(false);
+  const [oobeError, setOobeError] = React.useState<string | null>(null);
   const [loadingConfig, setLoadingConfig] = React.useState(false);
   const [showBackToTop, setShowBackToTop] = React.useState(false);
   const [defaultServerUrl, setDefaultServerUrl] = React.useState("");
@@ -125,21 +107,119 @@ export default function Home() {
   }, []);
 
   const regenerateToken = React.useCallback(() => {
-    setSuggestedToken(generateStrongToken());
-    setTokenSettingError(null);
+    setOobeToken(generateStrongToken());
+    setOobeError(null);
   }, []);
 
-  const applySuggestedToken = React.useCallback(async () => {
+  const handleServerUrlChange = React.useCallback((value: string) => {
+    setLoginServerUrl(value);
+    setAuthError(null);
+  }, []);
+
+  const handleTokenChange = React.useCallback((value: string) => {
+    setLoginToken(value);
+    setAuthError(null);
+  }, []);
+
+  const handleOobeTokenChange = React.useCallback((value: string) => {
+    setOobeToken(value);
+    setOobeError(null);
+  }, []);
+
+  const handleLoginBack = React.useCallback(() => {
+    setLoginStep("server");
+    setAuthError(null);
+  }, []);
+
+  const handleServerNext = React.useCallback(async () => {
+    const normalized = normalizeServerUrl(loginServerUrl);
+    if (!normalized) {
+      setAuthError("Invalid server URL.");
+      return;
+    }
+    if (defaultServerUrl && normalized !== defaultServerUrl) {
+      setAuthError("Server URL must match this site for CSRF protection.");
+      return;
+    }
+    setLoginServerUrl(normalized);
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const data = await fetchJson<ConfigResponse>(
+        "/api/config",
+        undefined,
+        { baseUrl: normalized, token: "" }
+      );
+      const nextAuth = { baseUrl: normalized, token: "" };
+      writeAuthConfig(nextAuth);
+      setAuth(nextAuth);
+      setLoginToken("");
+      setLoginStep("server");
+      if (!data.api_auth_required) {
+        setOobeToken(generateStrongToken());
+        setOobeError(null);
+        setOobeActive(true);
+      }
+    } catch (err) {
+      const statusCode =
+        typeof err === "object" && err && "status" in err
+          ? (err as { status?: number }).status
+          : undefined;
+      if (statusCode === 403) {
+        setLoginStep("token");
+        setAuthError("Access token required.");
+        return;
+      }
+      setAuthError(err instanceof Error ? err.message : "Failed to connect.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [defaultServerUrl, loginServerUrl]);
+
+  const handleTokenLogin = React.useCallback(async () => {
+    const normalized = normalizeServerUrl(loginServerUrl);
+    if (!normalized) {
+      setAuthError("Invalid server URL.");
+      return;
+    }
+    if (defaultServerUrl && normalized !== defaultServerUrl) {
+      setAuthError("Server URL must match this site for CSRF protection.");
+      return;
+    }
+    setLoginServerUrl(normalized);
+    const trimmedToken = loginToken.trim();
+    if (!trimmedToken) {
+      setAuthError("Token is required.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    const nextAuth = { baseUrl: normalized, token: trimmedToken };
+    try {
+      await fetchJson<ConfigResponse>("/api/config", undefined, nextAuth);
+      writeAuthConfig(nextAuth);
+      setAuth(nextAuth);
+      setLoginToken("");
+      setLoginStep("server");
+      setOobeActive(false);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Failed to connect.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [defaultServerUrl, loginServerUrl, loginToken]);
+
+  const handleOobeSubmit = React.useCallback(async () => {
     if (!auth) {
       return;
     }
-    const token = suggestedToken.trim();
+    const token = oobeToken.trim();
     if (!token) {
-      setTokenSettingError("Generated token is empty.");
+      setOobeError("Token is required.");
       return;
     }
-    setTokenSetting(true);
-    setTokenSettingError(null);
+    setOobeLoading(true);
+    setOobeError(null);
     try {
       await fetchJson("/api/control/token", {
         method: "POST",
@@ -148,38 +228,16 @@ export default function Home() {
       const nextAuth = { baseUrl: auth.baseUrl, token };
       writeAuthConfig(nextAuth);
       setAuth(nextAuth);
-      setTokenPromptOpen(false);
+      setOobeActive(false);
       pushStatus({ kind: "ok", message: "api_access_token updated" });
     } catch (err) {
-      setTokenSettingError(
+      setOobeError(
         err instanceof Error ? err.message : "Failed to update api_access_token."
       );
     } finally {
-      setTokenSetting(false);
+      setOobeLoading(false);
     }
-  }, [auth, pushStatus, suggestedToken]);
-
-  const handleCopyToken = React.useCallback(async () => {
-    const token = suggestedToken.trim();
-    if (!token) {
-      setTokenCopyStatus("error");
-      setTokenCopyMessage("No token to copy.");
-      return;
-    }
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      setTokenCopyStatus("error");
-      setTokenCopyMessage("Clipboard not available.");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(token);
-      setTokenCopyStatus("ok");
-      setTokenCopyMessage("Copied to clipboard.");
-    } catch {
-      setTokenCopyStatus("error");
-      setTokenCopyMessage("Failed to copy token.");
-    }
-  }, [suggestedToken]);
+  }, [auth, oobeToken, pushStatus]);
 
   const loadConfig = React.useCallback(async () => {
     setLoadingConfig(true);
@@ -193,8 +251,14 @@ export default function Home() {
           : undefined;
       if (statusCode === 403) {
         clearAuthConfig();
+        if (auth?.baseUrl) {
+          setLoginServerUrl(auth.baseUrl);
+        }
+        setLoginToken("");
+        setLoginStep("token");
         setAuth(null);
         setAuthError("Token expired or invalid. Please sign in again.");
+        setOobeActive(false);
         return;
       }
       pushStatus({
@@ -204,7 +268,7 @@ export default function Home() {
     } finally {
       setLoadingConfig(false);
     }
-  }, [pushStatus]);
+  }, [auth, pushStatus]);
 
   const checkPing = React.useCallback(async () => {
     if (!auth) {
@@ -222,8 +286,14 @@ export default function Home() {
       setOnline(false);
       if (statusCode === 403) {
         clearAuthConfig();
+        if (auth?.baseUrl) {
+          setLoginServerUrl(auth.baseUrl);
+        }
+        setLoginToken("");
+        setLoginStep("token");
         setAuth(null);
         setAuthError("Token expired or invalid. Please sign in again.");
+        setOobeActive(false);
       }
     }
   }, [auth]);
@@ -233,6 +303,12 @@ export default function Home() {
       setDefaultServerUrl(window.location.origin);
     }
   }, []);
+
+  React.useEffect(() => {
+    if (defaultServerUrl && !loginServerUrl) {
+      setLoginServerUrl(defaultServerUrl);
+    }
+  }, [defaultServerUrl, loginServerUrl]);
 
   React.useEffect(() => {
     const stored = readAuthConfig();
@@ -253,38 +329,16 @@ export default function Home() {
 
   React.useEffect(() => {
     if (!auth || !config) {
-      setTokenPromptOpen(false);
-      setTokenPrompted(false);
+      setOobeActive(false);
       return;
     }
-    if (config.api_auth_required) {
-      setTokenPromptOpen(false);
-      setTokenPrompted(false);
-      return;
+    const needsOobe = !config.api_auth_required && !auth.token;
+    if (needsOobe && !oobeToken) {
+      setOobeToken(generateStrongToken());
+      setOobeError(null);
     }
-    if (!tokenPrompted) {
-      setSuggestedToken(generateStrongToken());
-      setTokenSettingError(null);
-      setTokenPromptOpen(true);
-      setTokenPrompted(true);
-    }
-  }, [auth, config, tokenPrompted]);
-
-  React.useEffect(() => {
-    setTokenCopyStatus("idle");
-    setTokenCopyMessage("");
-  }, [suggestedToken, tokenPromptOpen]);
-
-  React.useEffect(() => {
-    if (tokenCopyStatus === "idle") {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setTokenCopyStatus("idle");
-      setTokenCopyMessage("");
-    }, 2000);
-    return () => window.clearTimeout(timer);
-  }, [tokenCopyStatus]);
+    setOobeActive(needsOobe);
+  }, [auth, config, oobeToken]);
 
   React.useEffect(() => {
     if (!auth) {
@@ -316,94 +370,6 @@ export default function Home() {
 
   return (
     <TooltipProvider delayDuration={250}>
-      <Dialog
-        open={tokenPromptOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            setTokenPromptOpen(false);
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Secure your API</DialogTitle>
-            <DialogDescription>
-              <span className="inline-flex items-center gap-2 my-2">
-                <AlertTriangle className="h-6 w-6 text-amber-500" />
-                <span>
-                  <span className="font-semibold">api_access_token is not configured.</span><br />
-                  <span className="font-semibold">Set one now</span> to protect /api access.
-                </span>
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                Generated token
-              </p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Input
-                  value={suggestedToken}
-                  readOnly
-                  onFocus={(event) => event.currentTarget.select()}
-                  className="sm:flex-1"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Tooltip open={tokenCopyStatus !== "idle"}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="subtle"
-                        size="sm"
-                        onClick={handleCopyToken}
-                        disabled={tokenSetting}
-                      >
-                        <Copy className="h-4 w-4" />
-                        Copy
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {tokenCopyMessage || "Copy"}
-                    </TooltipContent>
-                  </Tooltip>
-                  <Button
-                    type="button"
-                    variant="subtle"
-                    size="sm"
-                    onClick={regenerateToken}
-                    disabled={tokenSetting}
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Regenerate
-                  </Button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Save this token securely. You will need it for future logins.
-              </p>
-            </div>
-            {tokenSettingError && (
-              <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-600">
-                {tokenSettingError}
-              </div>
-            )}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setTokenPromptOpen(false)}
-                disabled={tokenSetting}
-              >
-                Later
-              </Button>
-              <Button type="button" onClick={applySuggestedToken} disabled={tokenSetting}>
-                {tokenSetting ? "Setting..." : "Set token & reload"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
       <div className="relative min-h-screen bg-background text-foreground">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
           <div className="absolute -top-24 left-[6%] h-72 w-72 rounded-full bg-[radial-gradient(circle_at_center,rgba(20,184,166,0.35),transparent_70%)] blur-2xl animate-[drift_18s_ease-in-out_infinite]" />
@@ -453,6 +419,9 @@ export default function Home() {
                       setConfig(null);
                       setAuthError(null);
                       setOnline(false);
+                      setLoginStep("server");
+                      setLoginToken("");
+                      setOobeActive(false);
                     }}
                     className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition hover:text-foreground"
                   >
@@ -488,7 +457,18 @@ export default function Home() {
           </header>
 
           {!authReady ? null : auth ? (
-            <Tabs defaultValue="subscription" className="w-full">
+            oobeActive ? (
+              <OobeScreen
+                baseUrl={auth.baseUrl}
+                token={oobeToken}
+                loading={oobeLoading}
+                error={oobeError}
+                onTokenChange={handleOobeTokenChange}
+                onGenerate={regenerateToken}
+                onSubmit={handleOobeSubmit}
+              />
+            ) : (
+              <Tabs defaultValue="subscription" className="w-full">
               <div className="sticky top-4 z-40 -mx-2 px-2 pb-2">
                 <TabsList className="flex flex-wrap gap-2 shadow-lg shadow-black/5">
                   <TabsTrigger value="subscription" className="gap-2">
@@ -586,40 +566,20 @@ export default function Home() {
                   }}
                 />
               </TabsContent>
-            </Tabs>
+              </Tabs>
+            )
           ) : (
             <LoginScreen
-              defaultServerUrl={defaultServerUrl}
+              step={loginStep}
+              serverUrl={loginServerUrl}
+              token={loginToken}
               loading={authLoading}
               error={authError}
-              onSubmit={async (serverUrl, token) => {
-                const normalized = normalizeServerUrl(serverUrl);
-                if (!normalized) {
-                  setAuthError("Invalid server URL.");
-                  return;
-                }
-                if (defaultServerUrl && normalized !== defaultServerUrl) {
-                  setAuthError("Server URL must match this site for CSRF protection.");
-                  return;
-                }
-                const trimmedToken = token.trim();
-                setAuthLoading(true);
-                setAuthError(null);
-                const nextAuth = { baseUrl: normalized, token: trimmedToken };
-                try {
-                  await fetchJson<ConfigResponse>("/api/config", undefined, nextAuth);
-                  writeAuthConfig(nextAuth);
-                  setAuth(nextAuth);
-                } catch (err) {
-                  clearAuthConfig();
-                  setAuth(null);
-                  setAuthError(
-                    err instanceof Error ? err.message : "Failed to connect."
-                  );
-                } finally {
-                  setAuthLoading(false);
-                }
-              }}
+              onServerUrlChange={handleServerUrlChange}
+              onTokenChange={handleTokenChange}
+              onNext={handleServerNext}
+              onLogin={handleTokenLogin}
+              onBack={handleLoginBack}
             />
           )}
         </div>

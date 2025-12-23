@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,35 +12,45 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
+type LoginStep = "server" | "token";
+
 type LoginScreenProps = {
-  defaultServerUrl: string;
+  step: LoginStep;
+  serverUrl: string;
+  token: string;
   loading: boolean;
   error?: string | null;
-  onSubmit: (serverUrl: string, token: string) => void;
+  onServerUrlChange: (value: string) => void;
+  onTokenChange: (value: string) => void;
+  onNext: () => void;
+  onLogin: () => void;
+  onBack?: () => void;
 };
 
 export function LoginScreen({
-  defaultServerUrl,
+  step,
+  serverUrl,
+  token,
   loading,
   error,
-  onSubmit,
+  onServerUrlChange,
+  onTokenChange,
+  onNext,
+  onLogin,
+  onBack,
 }: LoginScreenProps) {
-  const [serverUrl, setServerUrl] = React.useState(defaultServerUrl);
-  const [token, setToken] = React.useState("");
-
-  React.useEffect(() => {
-    if (defaultServerUrl) {
-      setServerUrl(defaultServerUrl);
-    }
-  }, [defaultServerUrl]);
-
+  const isTokenStep = step === "token";
   return (
     <div className="mx-auto w-full max-w-xl">
       <Card className="animate-[fade-in_0.5s_ease_forwards]">
         <CardHeader className="space-y-3">
-          <CardTitle className="text-2xl">Get Started</CardTitle>
+          <CardTitle className="text-2xl">
+            {isTokenStep ? "Enter Access Token" : "Get Started"}
+          </CardTitle>
           <CardDescription>
-            Connect to your Subcon server to manage profiles, rules, and schema mappings.
+            {isTokenStep
+              ? "This server requires an access token to continue."
+              : "Connect to your Subcon server to manage profiles, rules, and schema mappings."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -49,44 +58,59 @@ export function LoginScreen({
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              onSubmit(serverUrl, token);
+              if (isTokenStep) {
+                onLogin();
+              } else {
+                onNext();
+              }
             }}
           >
             <div className="space-y-2">
               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                 Server URL
               </p>
-              <Input
-                value={serverUrl}
-                onChange={(event) => setServerUrl(event.target.value)}
-                placeholder="http://127.0.0.1:25500"
-                autoComplete="url"
-              />
+              {isTokenStep ? (
+                <Input value={serverUrl} readOnly />
+              ) : (
+                <Input
+                  value={serverUrl}
+                  onChange={(event) => onServerUrlChange(event.target.value)}
+                  placeholder="http://127.0.0.1:25500"
+                  autoComplete="url"
+                />
+              )}
             </div>
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                Access Token
-              </p>
-              <Input
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="api_access_token"
-                type="password"
-                autoComplete="current-password"
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave blank if api_access_token is not configured.
-              </p>
-            </div>
+            {isTokenStep && (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  Access Token
+                </p>
+                <Input
+                  value={token}
+                  onChange={(event) => onTokenChange(event.target.value)}
+                  placeholder="api_access_token"
+                  type="password"
+                  name="api_access_token"
+                  autoComplete="current-password"
+                />
+              </div>
+            )}
             {error && (
               <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-600">
                 {error}
               </div>
             )}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Connect
-            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {isTokenStep && onBack && (
+                <Button type="button" variant="ghost" onClick={onBack} disabled={loading}>
+                  Back
+                </Button>
+              )}
+              <Button type="submit" className="sm:min-w-[140px]" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {isTokenStep ? "Connect" : "Next"}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               Credentials are stored locally in this browser. Use Logout to clear them.
             </p>
