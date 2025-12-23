@@ -4,6 +4,11 @@ icon: lucide/list
 
 # Changelog
 
+## 0.5.0
+- Web UI refinements: broadened online editors for profiles/rules/groups/schema and improved panel workflows.
+- OOBE now requires setting `api_access_token` before continuing.
+- Debian package: add systemd service unit with default `/etc/subcon/conf/pref.toml` config path.
+
 ## 0.4.0
 - Added VMess protocol schema.
 - Improved Web UI token flow with warnings and guided api_access_token setup.
