@@ -6,5 +6,5 @@ services:
     ports:
       - "25500:25500"
     volumes:
-      - ./conf:/app/conf:ro
+      - ./conf:/app/conf
     command: [ "--pref", "conf/pref.toml" ]
