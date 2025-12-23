@@ -16,6 +16,14 @@ import {
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CachePanel } from "@/components/studio/cache-panel";
@@ -101,6 +109,68 @@ export default function Home() {
   const [loadingConfig, setLoadingConfig] = React.useState(false);
   const [showBackToTop, setShowBackToTop] = React.useState(false);
   const [defaultServerUrl, setDefaultServerUrl] = React.useState("");
+  const [activeTab, setActiveTab] = React.useState("subscription");
+  const [dirtyFlags, setDirtyFlags] = React.useState<Record<string, boolean>>({});
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [pendingTab, setPendingTab] = React.useState<string | null>(null);
+  const saveHandlersRef = React.useRef<Record<string, () => Promise<boolean>>>({});
+  const discardHandlersRef = React.useRef<Record<string, () => Promise<void>>>({});
+
+  const updateDirtyFlag = React.useCallback(
+    (key: string, dirty: boolean) => {
+      setDirtyFlags((prev) =>
+        prev[key] === dirty ? prev : { ...prev, [key]: dirty }
+      );
+    },
+    []
+  );
+
+  const handleProfilesDirtyChange = React.useCallback(
+    (dirty: boolean) => updateDirtyFlag("profiles", dirty),
+    [updateDirtyFlag]
+  );
+  const handleRulesDirtyChange = React.useCallback(
+    (dirty: boolean) => updateDirtyFlag("rules", dirty),
+    [updateDirtyFlag]
+  );
+  const handleGroupsDirtyChange = React.useCallback(
+    (dirty: boolean) => updateDirtyFlag("groups", dirty),
+    [updateDirtyFlag]
+  );
+  const handleSchemaDirtyChange = React.useCallback(
+    (dirty: boolean) => updateDirtyFlag("schema", dirty),
+    [updateDirtyFlag]
+  );
+  const registerSaveHandler = React.useCallback(
+    (key: string, handler: () => Promise<boolean>) => {
+      saveHandlersRef.current[key] = handler;
+    },
+    []
+  );
+  const registerDiscardHandler = React.useCallback(
+    (key: string, handler: () => Promise<void>) => {
+      discardHandlersRef.current[key] = handler;
+    },
+    []
+  );
+
+  const hasUnsavedChanges = React.useMemo(
+    () => Object.values(dirtyFlags).some(Boolean),
+    [dirtyFlags]
+  );
+
+  React.useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnsavedChanges]);
 
   const pushStatus = React.useCallback((next: Status) => {
     setStatus(next);
@@ -468,105 +538,219 @@ export default function Home() {
                 onSubmit={handleOobeSubmit}
               />
             ) : (
-              <Tabs defaultValue="subscription" className="w-full">
-              <div className="sticky top-4 z-40 -mx-2 px-2 pb-2">
-                <TabsList className="flex flex-wrap gap-2 shadow-lg shadow-black/5">
-                  <TabsTrigger value="subscription" className="gap-2">
-                    <TerminalSquare className="h-4 w-4" />
-                    Subscription
-                  </TabsTrigger>
-                  <TabsTrigger value="profiles" className="gap-2">
-                    <FileText className="h-4 w-4" />
-                    Profiles
-                  </TabsTrigger>
-                  <TabsTrigger value="rules" className="gap-2">
-                    <ScrollText className="h-4 w-4" />
-                    Rules
-                  </TabsTrigger>
-                  <TabsTrigger value="schema" className="gap-2">
-                    <Layers3 className="h-4 w-4" />
-                    Schema
-                  </TabsTrigger>
-                  <TabsTrigger value="groups" className="gap-2">
-                    <Users className="h-4 w-4" />
-                    Groups
-                  </TabsTrigger>
-                  <TabsTrigger value="cache" className="gap-2">
-                    <TrendingUp className="h-4 w-4" />
-                    Cache
-                  </TabsTrigger>
-                  <TabsTrigger value="config" className="gap-2">
-                    <Settings2 className="h-4 w-4" />
-                    Config
-                  </TabsTrigger>
-                  <TabsTrigger value="control" className="gap-2">
-                    <CloudCog className="h-4 w-4" />
-                    Control
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+              <>
+                <Tabs
+                  value={activeTab}
+                  onValueChange={(next) => {
+                    if (next === activeTab) {
+                      return;
+                    }
+                    if (hasUnsavedChanges) {
+                      setPendingTab(next);
+                      setConfirmOpen(true);
+                      return;
+                    }
+                    setActiveTab(next);
+                  }}
+                  className="w-full"
+                >
+                  <div className="sticky top-4 z-40 -mx-2 px-2 pb-2">
+                    <TabsList className="flex flex-wrap gap-2 shadow-lg shadow-black/5">
+                      <TabsTrigger value="subscription" className="gap-2">
+                        <TerminalSquare className="h-4 w-4" />
+                        Subscription
+                      </TabsTrigger>
+                      <TabsTrigger value="profiles" className="gap-2">
+                        <FileText className="h-4 w-4" />
+                        Profiles
+                      </TabsTrigger>
+                      <TabsTrigger value="rules" className="gap-2">
+                        <ScrollText className="h-4 w-4" />
+                        Rules
+                      </TabsTrigger>
+                      <TabsTrigger value="groups" className="gap-2">
+                        <Users className="h-4 w-4" />
+                        Groups
+                      </TabsTrigger>
+                      <TabsTrigger value="schema" className="gap-2">
+                        <Layers3 className="h-4 w-4" />
+                        Schema
+                      </TabsTrigger>
+                      <TabsTrigger value="cache" className="gap-2">
+                        <TrendingUp className="h-4 w-4" />
+                        Cache
+                      </TabsTrigger>
+                      <TabsTrigger value="config" className="gap-2">
+                        <Settings2 className="h-4 w-4" />
+                        Config
+                      </TabsTrigger>
+                      <TabsTrigger value="control" className="gap-2">
+                        <CloudCog className="h-4 w-4" />
+                        Control
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
 
-              <TabsContent value="subscription">
-                <SubscriptionPanel config={config} />
-              </TabsContent>
+                  <TabsContent value="subscription">
+                    <SubscriptionPanel config={config} />
+                  </TabsContent>
 
-              <TabsContent value="profiles">
-                <ProfilesPanel onStatus={pushStatus} />
-              </TabsContent>
+                  <TabsContent value="profiles">
+                    <ProfilesPanel
+                      onStatus={pushStatus}
+                      onDirtyChange={handleProfilesDirtyChange}
+                      onRegisterSave={(handler) =>
+                        registerSaveHandler("profiles", handler)
+                      }
+                      onRegisterDiscard={(handler) =>
+                        registerDiscardHandler("profiles", handler)
+                      }
+                    />
+                  </TabsContent>
 
-              <TabsContent value="rules">
-                <RulesPanel onStatus={pushStatus} />
-              </TabsContent>
+                  <TabsContent value="rules">
+                    <RulesPanel
+                      onStatus={pushStatus}
+                      onDirtyChange={handleRulesDirtyChange}
+                      onRegisterSave={(handler) =>
+                        registerSaveHandler("rules", handler)
+                      }
+                      onRegisterDiscard={(handler) =>
+                        registerDiscardHandler("rules", handler)
+                      }
+                    />
+                  </TabsContent>
 
-              <TabsContent value="schema">
-                <SchemaPanel onStatus={pushStatus} />
-              </TabsContent>
+                  <TabsContent value="groups">
+                    <GroupsPanel
+                      onStatus={pushStatus}
+                      onDirtyChange={handleGroupsDirtyChange}
+                      onRegisterSave={(handler) =>
+                        registerSaveHandler("groups", handler)
+                      }
+                      onRegisterDiscard={(handler) =>
+                        registerDiscardHandler("groups", handler)
+                      }
+                    />
+                  </TabsContent>
+                  <TabsContent value="schema">
+                    <SchemaPanel
+                      onStatus={pushStatus}
+                      onDirtyChange={handleSchemaDirtyChange}
+                      onRegisterSave={(handler) =>
+                        registerSaveHandler("schema", handler)
+                      }
+                      onRegisterDiscard={(handler) =>
+                        registerDiscardHandler("schema", handler)
+                      }
+                    />
+                  </TabsContent>
 
-              <TabsContent value="groups">
-                <GroupsPanel onStatus={pushStatus} />
-              </TabsContent>
+                  <TabsContent value="cache">
+                    <CachePanel onStatus={pushStatus} />
+                  </TabsContent>
 
-              <TabsContent value="cache">
-                <CachePanel onStatus={pushStatus} />
-              </TabsContent>
+                  <TabsContent value="config">
+                    <ConfigPanel
+                      config={config}
+                      loading={loadingConfig}
+                      onReload={loadConfig}
+                      onStatus={pushStatus}
+                    />
+                  </TabsContent>
 
-              <TabsContent value="config">
-                <ConfigPanel
-                  config={config}
-                  loading={loadingConfig}
-                  onReload={loadConfig}
-                  onStatus={pushStatus}
-                />
-              </TabsContent>
-
-              <TabsContent value="control">
-                <ControlPanel
-                  onReload={async () => {
-                    try {
-                      await fetchJson("/api/control/reload", { method: "POST" });
-                      pushStatus({ kind: "ok", message: "Configuration reloaded" });
-                      await loadConfig();
-                    } catch (err) {
-                      pushStatus({
-                        kind: "error",
-                        message: err instanceof Error ? err.message : "Reload failed",
-                      });
+                  <TabsContent value="control">
+                    <ControlPanel
+                      onReload={async () => {
+                        try {
+                          await fetchJson("/api/control/reload", {
+                            method: "POST",
+                          });
+                          pushStatus({
+                            kind: "ok",
+                            message: "Configuration reloaded",
+                          });
+                          await loadConfig();
+                        } catch (err) {
+                          pushStatus({
+                            kind: "error",
+                            message:
+                              err instanceof Error ? err.message : "Reload failed",
+                          });
+                        }
+                      }}
+                      onRestart={async () => {
+                        try {
+                          await fetchJson("/api/control/restart", {
+                            method: "POST",
+                          });
+                          pushStatus({ kind: "info", message: "Restart requested" });
+                        } catch (err) {
+                          pushStatus({
+                            kind: "error",
+                            message:
+                              err instanceof Error ? err.message : "Restart failed",
+                          });
+                        }
+                      }}
+                    />
+                  </TabsContent>
+                </Tabs>
+                <Dialog
+                  open={confirmOpen}
+                  onOpenChange={(open) => {
+                    setConfirmOpen(open);
+                    if (!open) {
+                      setPendingTab(null);
                     }
                   }}
-                  onRestart={async () => {
-                    try {
-                      await fetchJson("/api/control/restart", { method: "POST" });
-                      pushStatus({ kind: "info", message: "Restart requested" });
-                    } catch (err) {
-                      pushStatus({
-                        kind: "error",
-                        message: err instanceof Error ? err.message : "Restart failed",
-                      });
-                    }
-                  }}
-                />
-              </TabsContent>
-              </Tabs>
+                >
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Unsaved changes</DialogTitle>
+                      <DialogDescription>
+                        You have unsaved changes. Save them or discard before switching
+                        tabs.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        onClick={async () => {
+                          const handler = saveHandlersRef.current[activeTab];
+                          const ok = handler ? await handler() : true;
+                          if (!ok) {
+                            return;
+                          }
+                          setConfirmOpen(false);
+                          if (pendingTab) {
+                            setActiveTab(pendingTab);
+                          }
+                          setPendingTab(null);
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="border-rose-500/40 text-rose-600 hover:bg-rose-500/10"
+                        onClick={async () => {
+                          const handler = discardHandlersRef.current[activeTab];
+                          if (handler) {
+                            await handler();
+                          }
+                          setConfirmOpen(false);
+                          if (pendingTab) {
+                            setActiveTab(pendingTab);
+                          }
+                          setPendingTab(null);
+                        }}
+                      >
+                        Discard
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </>
             )
           ) : (
             <LoginScreen

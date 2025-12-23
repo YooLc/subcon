@@ -7,6 +7,9 @@ export type Status = {
 
 export type PanelProps = {
   onStatus: (status: Status) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onRegisterSave?: (save: () => Promise<boolean>) => void;
+  onRegisterDiscard?: (discard: () => Promise<void>) => void;
 };
 
 export type FileEntry = {
@@ -59,10 +62,24 @@ export type GroupEntry = {
   url?: string | null;
   interval?: number | null;
   rulesets: string[];
+  proxies: string[];
 };
 
 export type GroupResponse = {
   items: GroupEntry[];
+};
+
+export type UpdateGroupMembersRequest = {
+  items: Array<{
+    group: string;
+    proxies: string[];
+  }>;
+};
+
+export type UpdateGroupMembersResponse = {
+  ok: boolean;
+  updated: string[];
+  missing: string[];
 };
 
 export type CacheEntry = {
@@ -91,6 +108,7 @@ export type ProxyItem = {
   server: string;
   port: string;
   fields: ProxyField[];
+  groups: string[];
 };
 
 export type ProfileState = {

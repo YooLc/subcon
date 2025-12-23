@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Component, Path, PathBuf},
 };
 
@@ -14,6 +14,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use toml_edit::{Array, DocumentMut, Item, Value};
 use tokio::fs;
 use tracing::{info, warn};
 
@@ -21,6 +22,7 @@ use crate::config::Pref;
 use crate::logging;
 use crate::paths::resolve_path;
 use crate::server::util::load_group_specs_from_pref;
+use crate::{groups, proxy};
 
 use super::{ApiError, AppState, build_runtime};
 
@@ -36,6 +38,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/schema/{*path}", get(get_schema).put(update_schema))
         .route("/logs", get(get_logs))
         .route("/groups", get(get_groups))
+        .route("/groups/members", post(update_group_members))
+        .route("/snippets/groups", get(get_groups_snippet).put(update_groups_snippet))
+        .route("/snippets/rulesets", get(get_rulesets_snippet).put(update_rulesets_snippet))
         .route("/cache", get(get_cache))
         .route("/control/reload", post(control_reload))
         .route("/control/token", post(control_set_api_token))
@@ -96,11 +101,29 @@ struct UpdateApiTokenRequest {
     token: String,
 }
 
+#[derive(Deserialize)]
+struct UpdateGroupMembersRequest {
+    items: Vec<GroupMemberUpdate>,
+}
+
+#[derive(Deserialize)]
+struct GroupMemberUpdate {
+    group: String,
+    proxies: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct UpdateFileResponse {
     ok: bool,
     path: String,
     bytes: usize,
+}
+
+#[derive(Serialize)]
+struct UpdateGroupMembersResponse {
+    ok: bool,
+    updated: Vec<String>,
+    missing: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -132,6 +155,7 @@ struct GroupEntry {
     url: Option<String>,
     interval: Option<u64>,
     rulesets: Vec<String>,
+    proxies: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -359,7 +383,7 @@ async fn update_profile(
 
 async fn list_rules(State(state): State<AppState>) -> Result<Json<FileListResponse>, ApiError> {
     let root = resolve_rules_dir(&state.base_dir);
-    let entries = list_files_flat(&root, &["list"]).await?;
+    let entries = list_files_flat(&root, &["list", "yaml", "yml"]).await?;
     Ok(Json(FileListResponse { items: entries }))
 }
 
@@ -368,7 +392,7 @@ async fn get_rule(
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<FileContentResponse>, ApiError> {
     let root = resolve_rules_dir(&state.base_dir);
-    let file = resolve_single_file(&root, &name, &["list"])?;
+    let file = resolve_single_file(&root, &name, &["list", "yaml", "yml"])?;
     let content = read_file(&file).await?;
     Ok(Json(FileContentResponse {
         name,
@@ -383,7 +407,7 @@ async fn update_rule(
     Json(body): Json<UpdateFileRequest>,
 ) -> Result<Json<UpdateFileResponse>, ApiError> {
     let root = resolve_rules_dir(&state.base_dir);
-    let file = resolve_single_file(&root, &name, &["list"])?;
+    let file = resolve_single_file(&root, &name, &["list", "yaml", "yml"])?;
     let bytes = write_file(&file, &body.content).await?;
     info!(path = %file.display(), bytes, "rules file updated");
     Ok(Json(UpdateFileResponse {
@@ -473,12 +497,34 @@ async fn get_groups(State(state): State<AppState>) -> Result<Json<GroupResponse>
     let pref = &runtime.pref;
     let specs = load_group_specs_from_pref(pref, &state.base_dir).map_err(ApiError::internal)?;
     let ruleset_map = load_ruleset_groups(pref, &state.base_dir).await?;
+    let proxy_groups = match proxy::collect_profile_files(&resolve_profiles_dir(&state.base_dir))
+        .and_then(|paths| proxy::load_from_paths(&runtime.registry, paths))
+        .and_then(|proxies| groups::build_groups(&specs, &proxies))
+    {
+        Ok(groups) => groups,
+        Err(err) => {
+            warn!(error = %err, "failed to build proxy groups");
+            Vec::new()
+        }
+    };
+    let proxies_by_group: HashMap<String, Vec<String>> = proxy_groups
+        .into_iter()
+        .map(|group| {
+            let proxies = group
+                .proxies
+                .into_iter()
+                .filter(|proxy| !proxy.starts_with("[]"))
+                .collect();
+            (group.name, proxies)
+        })
+        .collect();
 
     let items = specs
         .into_iter()
         .map(|spec| {
             let name = spec.name;
             let rulesets = ruleset_map.get(&name).cloned().unwrap_or_default();
+            let proxies = proxies_by_group.get(&name).cloned().unwrap_or_default();
             GroupEntry {
                 name,
                 group_type: spec.group_type,
@@ -486,11 +532,162 @@ async fn get_groups(State(state): State<AppState>) -> Result<Json<GroupResponse>
                 url: spec.url,
                 interval: spec.interval,
                 rulesets,
+                proxies,
             }
         })
         .collect();
 
     Ok(Json(GroupResponse { items }))
+}
+
+async fn update_group_members(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateGroupMembersRequest>,
+) -> Result<Json<UpdateGroupMembersResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let pref = &runtime.pref;
+    let mut pending: HashMap<String, Vec<String>> = HashMap::new();
+    for item in body.items {
+        let group = item.group.trim();
+        if group.is_empty() {
+            continue;
+        }
+        let entry = pending.entry(group.to_string()).or_default();
+        for proxy in item.proxies {
+            let trimmed = proxy.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !entry.iter().any(|value| value == trimmed) {
+                entry.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if pending.is_empty() {
+        return Ok(Json(UpdateGroupMembersResponse {
+            ok: true,
+            updated: Vec::new(),
+            missing: Vec::new(),
+        }));
+    }
+
+    let mut updated = Vec::new();
+
+    for entry in &pref.custom_groups {
+        if pending.is_empty() {
+            break;
+        }
+        let path = resolve_path(&state.base_dir, &entry.import);
+        let text = fs::read_to_string(&path).await.map_err(ApiError::internal)?;
+        let mut doc: DocumentMut = text
+            .parse()
+            .with_context(|| format!("failed to parse {}", path.display()))
+            .map_err(ApiError::internal)?;
+
+        let mut file_updated = false;
+        if let Some(array) = doc
+            .get_mut("groups")
+            .and_then(|item| item.as_array_of_tables_mut())
+        {
+            for table in array.iter_mut() {
+                let name = table
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                if let Some(proxies) = pending.remove(&name) {
+                    let changed = append_group_proxies(table, &proxies)?;
+                    if changed {
+                        file_updated = true;
+                    }
+                    updated.push(name);
+                }
+            }
+        }
+
+        if file_updated {
+            fs::write(&path, doc.to_string())
+                .await
+                .map_err(ApiError::internal)?;
+        }
+    }
+
+    let mut missing: Vec<String> = pending.keys().cloned().collect();
+    missing.sort();
+
+    Ok(Json(UpdateGroupMembersResponse {
+        ok: true,
+        updated,
+        missing,
+    }))
+}
+
+async fn get_groups_snippet(
+    State(state): State<AppState>,
+) -> Result<Json<FileContentResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_groups_snippet_path(&runtime.pref, &state.base_dir)?;
+    let content = read_file(&file).await?;
+    Ok(Json(FileContentResponse {
+        name: file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("groups.toml")
+            .to_string(),
+        path: file.display().to_string(),
+        content,
+    }))
+}
+
+async fn update_groups_snippet(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateFileRequest>,
+) -> Result<Json<UpdateFileResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_groups_snippet_path(&runtime.pref, &state.base_dir)?;
+    let bytes = write_file(&file, &body.content).await?;
+    info!(path = %file.display(), bytes, "groups snippet updated");
+    Ok(Json(UpdateFileResponse {
+        ok: true,
+        path: file.display().to_string(),
+        bytes,
+    }))
+}
+
+async fn get_rulesets_snippet(
+    State(state): State<AppState>,
+) -> Result<Json<FileContentResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_rulesets_snippet_path(&runtime.pref, &state.base_dir)?;
+    let content = read_file(&file).await?;
+    Ok(Json(FileContentResponse {
+        name: file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("rulesets.toml")
+            .to_string(),
+        path: file.display().to_string(),
+        content,
+    }))
+}
+
+async fn update_rulesets_snippet(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateFileRequest>,
+) -> Result<Json<UpdateFileResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_rulesets_snippet_path(&runtime.pref, &state.base_dir)?;
+    let bytes = write_file(&file, &body.content).await?;
+    info!(path = %file.display(), bytes, "rulesets snippet updated");
+    Ok(Json(UpdateFileResponse {
+        ok: true,
+        path: file.display().to_string(),
+        bytes,
+    }))
 }
 
 async fn get_cache(State(state): State<AppState>) -> Result<Json<CacheResponse>, ApiError> {
@@ -642,6 +839,20 @@ fn resolve_schema_dir(pref: &Pref, base_dir: &Path) -> Result<PathBuf, ApiError>
         .as_deref()
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "`common.schema` not set"))?;
     Ok(resolve_path(base_dir, schema_rel))
+}
+
+fn resolve_groups_snippet_path(pref: &Pref, base_dir: &Path) -> Result<PathBuf, ApiError> {
+    let entry = pref.custom_groups.first().ok_or_else(|| {
+        ApiError::new(StatusCode::NOT_FOUND, "no groups snippet configured")
+    })?;
+    Ok(resolve_path(base_dir, &entry.import))
+}
+
+fn resolve_rulesets_snippet_path(pref: &Pref, base_dir: &Path) -> Result<PathBuf, ApiError> {
+    let entry = pref.rulesets.first().ok_or_else(|| {
+        ApiError::new(StatusCode::NOT_FOUND, "no rulesets snippet configured")
+    })?;
+    Ok(resolve_path(base_dir, &entry.import))
 }
 
 fn system_path(path: &str) -> PathBuf {
@@ -819,6 +1030,37 @@ fn ensure_extension(path: &Path, exts: &[&str]) -> Result<(), ApiError> {
             format!("unsupported file extension .{ext}"),
         ))
     }
+}
+
+fn append_group_proxies(
+    table: &mut toml_edit::Table,
+    proxies: &[String],
+) -> Result<bool, ApiError> {
+    let item = table
+        .entry("rule")
+        .or_insert(Item::Value(Value::Array(Array::new())));
+    let array = item.as_array_mut().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "group rule must be an array",
+        )
+    })?;
+    let mut existing: HashSet<String> = array
+        .iter()
+        .filter_map(|value| value.as_str().map(|s| s.to_string()))
+        .collect();
+    let mut changed = false;
+    for proxy in proxies {
+        let trimmed = proxy.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if existing.insert(trimmed.to_string()) {
+            array.push(trimmed);
+            changed = true;
+        }
+    }
+    Ok(changed)
 }
 
 fn has_extension(path: &Path, exts: &[&str]) -> bool {

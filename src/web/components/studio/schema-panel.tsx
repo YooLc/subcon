@@ -7,6 +7,7 @@ import {
   Layers3,
   LayoutGrid,
   Loader2,
+  Plus,
   RefreshCw,
   Save,
   Star,
@@ -21,10 +22,17 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -146,7 +154,16 @@ function formatFieldValue(value: unknown): string {
   }
 }
 
-export function SchemaPanel({ onStatus }: PanelProps) {
+const SCHEMA_FILE_EXTS = ["yaml", "yml"];
+const DEFAULT_SCHEMA_EXTENSION = "yaml";
+const DEFAULT_SCHEMA_CONTENT = 'protocol: ""\nfields: {}\ntargets: {}\n';
+
+export function SchemaPanel({
+  onStatus,
+  onDirtyChange,
+  onRegisterSave,
+  onRegisterDiscard,
+}: PanelProps) {
   const [items, setItems] = React.useState<FileEntry[]>([]);
   const [selectedName, setSelectedName] = React.useState<string | null>(null);
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
@@ -158,6 +175,10 @@ export function SchemaPanel({ onStatus }: PanelProps) {
   const [loadingItem, setLoadingItem] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [parseError, setParseError] = React.useState<string | null>(null);
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [createName, setCreateName] = React.useState("");
+  const [createError, setCreateError] = React.useState<string | null>(null);
+  const [creating, setCreating] = React.useState(false);
   const selectedNameRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
@@ -234,6 +255,123 @@ export function SchemaPanel({ onStatus }: PanelProps) {
     void loadList();
   }, [loadList]);
 
+  React.useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const handleSave = React.useCallback(async (): Promise<boolean> => {
+    if (!selectedName) {
+      return true;
+    }
+    setSaving(true);
+    try {
+      const payload =
+        mode === "code"
+          ? content
+          : schemaState
+            ? buildSchemaYaml(schemaState)
+            : content;
+      await fetchJson<UpdateFileResponse>(
+        `/api/schema/${encodeURI(selectedName)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ content: payload }),
+        }
+      );
+      setContent(payload);
+      setDirty(false);
+      onStatus({ kind: "ok", message: `${selectedName} saved` });
+      return true;
+    } catch (err) {
+      onStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Save failed",
+      });
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [content, mode, onStatus, schemaState, selectedName]);
+
+  React.useEffect(() => {
+    if (!onRegisterSave) {
+      return;
+    }
+    onRegisterSave(handleSave);
+  }, [handleSave, onRegisterSave]);
+
+  React.useEffect(() => {
+    if (!onRegisterDiscard) {
+      return;
+    }
+    onRegisterDiscard(async () => {
+      if (selectedName) {
+        await loadItem(selectedName);
+      } else {
+        setDirty(false);
+      }
+    });
+  }, [loadItem, onRegisterDiscard, selectedName]);
+
+  const resetCreateForm = React.useCallback(() => {
+    setCreateName("");
+    setCreateError(null);
+  }, []);
+
+  const handleCreateOpenChange = React.useCallback(
+    (open: boolean) => {
+      setCreateOpen(open);
+      if (!open) {
+        resetCreateForm();
+      }
+    },
+    [resetCreateForm]
+  );
+
+  const handleCreate = React.useCallback(async () => {
+    const trimmed = createName.trim();
+    if (!trimmed) {
+      setCreateError("Enter a file name.");
+      return;
+    }
+    let finalName = trimmed;
+    const ext = trimmed.split(".").pop()?.toLowerCase() ?? "";
+    if (!ext || ext === trimmed) {
+      finalName = `${trimmed}.${DEFAULT_SCHEMA_EXTENSION}`;
+    } else if (!SCHEMA_FILE_EXTS.includes(ext)) {
+      setCreateError("Use .yaml or .yml.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const payload = DEFAULT_SCHEMA_CONTENT;
+      const response = await fetchJson<UpdateFileResponse>(
+        `/api/schema/${encodeURI(finalName)}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ content: payload }),
+        }
+      );
+      setSelectedName(finalName);
+      selectedNameRef.current = finalName;
+      setSelectedPath(response.path);
+      setContent(payload);
+      setSchemaState(parseSchema(payload));
+      setParseError(null);
+      setDirty(false);
+      setCreateOpen(false);
+      resetCreateForm();
+      onStatus({ kind: "ok", message: `${finalName} created` });
+      await loadList();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Create failed";
+      setCreateError(message);
+      onStatus({ kind: "error", message });
+    } finally {
+      setCreating(false);
+    }
+  }, [createName, loadList, onStatus, resetCreateForm]);
+
   const updateCell = React.useCallback(
     (targetName: string, fieldName: string, updater: (cell: SchemaCell) => SchemaCell) => {
       setSchemaState((prev) => {
@@ -265,38 +403,6 @@ export function SchemaPanel({ onStatus }: PanelProps) {
     },
     []
   );
-
-  const handleSave = React.useCallback(async () => {
-    if (!selectedName) {
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload =
-        mode === "code"
-          ? content
-          : schemaState
-            ? buildSchemaYaml(schemaState)
-            : content;
-      await fetchJson<UpdateFileResponse>(
-        `/api/schema/${encodeURI(selectedName)}`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ content: payload }),
-        }
-      );
-      setContent(payload);
-      setDirty(false);
-      onStatus({ kind: "ok", message: `${selectedName} saved` });
-    } catch (err) {
-      onStatus({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Save failed",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }, [content, mode, onStatus, schemaState, selectedName]);
 
   const switchMode = React.useCallback(
     (next: "friendly" | "code") => {
@@ -331,6 +437,58 @@ export function SchemaPanel({ onStatus }: PanelProps) {
           <CardDescription>Schema protocols and targets.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => void loadList()}
+              disabled={loadingList}
+            >
+              {loadingList ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Refresh list
+            </Button>
+            <Dialog open={createOpen} onOpenChange={handleCreateOpenChange}>
+              <DialogTrigger asChild>
+                <Button variant="secondary" size="sm">
+                  <Plus className="h-4 w-4" />
+                  New file
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>New schema</DialogTitle>
+                  <DialogDescription>
+                    Create a schema file (.yaml or .yml). Nested paths are allowed.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="mt-4 space-y-3">
+                  <Input
+                    value={createName}
+                    onChange={(event) => {
+                      setCreateName(event.target.value);
+                      setCreateError(null);
+                    }}
+                    placeholder={`protocol.${DEFAULT_SCHEMA_EXTENSION}`}
+                  />
+                  {createError && (
+                    <p className="text-xs text-rose-500">{createError}</p>
+                  )}
+                  <Button onClick={() => void handleCreate()} disabled={creating}>
+                    {creating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    Create file
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
           {items.length === 0 && !loadingList && (
             <div className="rounded-2xl border border-dashed border-border/60 bg-muted/40 px-4 py-6 text-sm text-muted-foreground">
               No schema files found.
@@ -367,20 +525,6 @@ export function SchemaPanel({ onStatus }: PanelProps) {
             })}
           </div>
         </CardContent>
-        <CardFooter>
-          <Button
-            variant="subtle"
-            onClick={() => void loadList()}
-            disabled={loadingList}
-          >
-            {loadingList ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh list
-          </Button>
-        </CardFooter>
       </Card>
 
       <Card className="animate-[fade-in_0.6s_ease_forwards]">
@@ -412,6 +556,27 @@ export function SchemaPanel({ onStatus }: PanelProps) {
                 <Code2 className="h-4 w-4" />
                 Editor
               </Button>
+              <Button
+                onClick={() => void handleSave()}
+                disabled={!selectedName || saving || loadingItem}
+                size="sm"
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                Save
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => selectedName && void loadItem(selectedName)}
+                disabled={!selectedName || loadingItem}
+                size="sm"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Reload
+              </Button>
             </div>
           </div>
           {parseError && (
@@ -434,27 +599,6 @@ export function SchemaPanel({ onStatus }: PanelProps) {
             />
           )}
         </CardContent>
-        <CardFooter className="flex flex-wrap gap-3">
-          <Button
-            onClick={handleSave}
-            disabled={!selectedName || saving || loadingItem}
-          >
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            Save
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => selectedName && void loadItem(selectedName)}
-            disabled={!selectedName || loadingItem}
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reload
-          </Button>
-        </CardFooter>
       </Card>
     </div>
   );
