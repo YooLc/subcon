@@ -4,6 +4,12 @@ icon: lucide/list
 
 # Changelog
 
+## 0.4.0
+- Added VMess protocol schema.
+- Improved Web UI token flow with warnings and guided api_access_token setup.
+- Fix: make `conf/` writable by default.
+- CI: fix Debian release packaging.
+
 ## 0.3.0
 - Added embedded web control panel with friendly editors + Monaco code mode for profiles, rules, and schema.
 - Added control panel actions for reload/restart and live log viewing.
