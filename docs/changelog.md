@@ -4,6 +4,10 @@ icon: lucide/list
 
 # Changelog
 
+## 0.5.1
+
+- Add a separate subscription url generater page under `/subscription`. This page can be accessed without api_access_token.
+
 ## 0.5.0
 - Web UI refinements: broadened online editors for profiles/rules/groups/schema and improved panel workflows.
 - OOBE now requires setting `api_access_token` before continuing.

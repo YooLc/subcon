@@ -1,6 +1,6 @@
 [package]
 name = "subcon"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "Subscription converter server for Clash and Surge configs"
 license = "MIT"
