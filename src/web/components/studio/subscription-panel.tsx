@@ -115,7 +115,7 @@ export function SubscriptionPanel({ config }: SubscriptionPanelProps) {
         </div>
         <div className="space-y-2 lg:col-span-2">
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            Origin URL (optional)
+            Subscription (optional)
           </p>
           <Input
             value={originUrl}

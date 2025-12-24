@@ -1,9 +1,9 @@
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Method, Request, StatusCode},
+    http::{HeaderValue, Method, Request, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use mime_guess::from_path;
 use tracing::warn;
 
@@ -26,9 +26,16 @@ pub async fn handle_web(req: Request<Body>) -> impl IntoResponse {
     }
 
     if !path.contains('.') {
-    if let Some(response) = serve_path("index.html") {
-        return response;
-    }
+        // Try to serve as a directory with index.html
+        let index_path = format!("{}/index.html", path);
+        if let Some(response) = serve_path(&index_path) {
+            return response;
+        }
+
+        // Fall back to serving root index.html for SPA routing
+        if let Some(response) = serve_path("index.html") {
+            return response;
+        }
     }
 
     warn!(uri = %req.uri(), "static asset not found");

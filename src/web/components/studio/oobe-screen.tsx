@@ -57,7 +57,8 @@ export function OobeScreen({
             <span className="inline-flex items-center gap-2 text-amber-600">
               <AlertTriangle className="h-4 w-4" />
               api_access_token is not configured.
-            </span>{" "}
+            </span>
+            <br />
             Set one now to protect /api access.
           </CardDescription>
         </CardHeader>

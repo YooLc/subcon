@@ -26,8 +26,8 @@ use crate::proxy;
 use crate::schema::SchemaRegistry;
 use crate::server::util::{gather_insert_paths, gather_profile_paths};
 
-mod clash;
 mod api;
+mod clash;
 mod surge;
 mod util;
 mod web;
@@ -184,9 +184,13 @@ async fn handle_sub(
         "handling /sub request"
     );
 
-    let proxies =
-        load_proxies_for_request(&runtime, &state.base_dir, params.url.as_deref(), include_insert)
-            .await?;
+    let proxies = load_proxies_for_request(
+        &runtime,
+        &state.base_dir,
+        params.url.as_deref(),
+        include_insert,
+    )
+    .await?;
 
     let body = renderer.render(RenderArgs {
         runtime: &runtime,
@@ -216,8 +220,8 @@ async fn load_proxies_for_request(
         let parsed_url = parse_subscription_url(raw_url)?;
         fetch_proxies_from_url(&runtime.network, registry, &parsed_url).await?
     } else {
-        let profiles = gather_profile_paths(pref, include_insert, base_dir)
-            .map_err(ApiError::internal)?;
+        let profiles =
+            gather_profile_paths(pref, include_insert, base_dir).map_err(ApiError::internal)?;
         proxy::load_from_paths(registry, profiles)
             .context("failed to load proxies from profiles")
             .map_err(ApiError::internal)?
