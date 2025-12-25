@@ -4,6 +4,10 @@ icon: lucide/list
 
 # Changelog
 
+## 0.5.2
+
+- Fix: VLESS schema optional fields for `flow` and `servername`.
+
 ## 0.5.1
 
 - Add a separate subscription url generater page under `/subscription`. This page can be accessed without api_access_token.

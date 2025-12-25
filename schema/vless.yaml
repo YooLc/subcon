@@ -24,8 +24,10 @@ targets:
         from: uuid
       flow:
         from: flow
+        optional: true
       servername:
         from: servername
+        optional: true
       packet-encoding:
         from: packet-encoding
         optional: true
