@@ -141,6 +141,10 @@ export default function Home() {
     (dirty: boolean) => updateDirtyFlag("schema", dirty),
     [updateDirtyFlag]
   );
+  const handleConfigDirtyChange = React.useCallback(
+    (dirty: boolean) => updateDirtyFlag("config", dirty),
+    [updateDirtyFlag]
+  );
   const registerSaveHandler = React.useCallback(
     (key: string, handler: () => Promise<boolean>) => {
       saveHandlersRef.current[key] = handler;
@@ -555,7 +559,7 @@ export default function Home() {
                   className="w-full"
                 >
                   <div className="sticky top-4 z-40 -mx-2 px-2 pb-2">
-                    <TabsList className="flex flex-wrap gap-2 shadow-lg shadow-black/5">
+                    <TabsList className="w-full justify-start gap-2 overflow-x-auto shadow-lg shadow-black/5 sm:justify-center">
                       <TabsTrigger value="subscription" className="gap-2">
                         <TerminalSquare className="h-4 w-4" />
                         Subscription
@@ -656,6 +660,13 @@ export default function Home() {
                       loading={loadingConfig}
                       onReload={loadConfig}
                       onStatus={pushStatus}
+                      onDirtyChange={handleConfigDirtyChange}
+                      onRegisterSave={(handler) =>
+                        registerSaveHandler("config", handler)
+                      }
+                      onRegisterDiscard={(handler) =>
+                        registerDiscardHandler("config", handler)
+                      }
                     />
                   </TabsContent>
 

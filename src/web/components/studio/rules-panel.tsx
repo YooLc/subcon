@@ -6,10 +6,12 @@ import {
   GripVertical,
   LayoutGrid,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
   ScrollText,
+  Trash2,
 } from "lucide-react";
 
 import { CodeEditor } from "@/components/code-editor";
@@ -34,12 +36,15 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/components/studio/api";
-import { languageForFile } from "@/components/studio/utils";
+import { useConfirmDialog } from "@/components/studio/confirm-dialog";
+import { isFileNonEmpty, languageForFile } from "@/components/studio/utils";
 import type {
+  DeleteFileResponse,
   FileContentResponse,
   FileEntry,
   FileListResponse,
   PanelProps,
+  RenameFileResponse,
   UpdateFileResponse,
 } from "@/components/studio/types";
 
@@ -242,6 +247,11 @@ export function RulesPanel({
   const [createName, setCreateName] = React.useState("");
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [renameOpen, setRenameOpen] = React.useState(false);
+  const [renameName, setRenameName] = React.useState("");
+  const [renameError, setRenameError] = React.useState<string | null>(null);
+  const [renaming, setRenaming] = React.useState(false);
+  const [renameTarget, setRenameTarget] = React.useState<FileEntry | null>(null);
   const [newRuleOpen, setNewRuleOpen] = React.useState(false);
   const [newRuleType, setNewRuleType] = React.useState(SUPPORTED_RULE_TYPES[0]);
   const [newRuleContent, setNewRuleContent] = React.useState("");
@@ -250,6 +260,7 @@ export function RulesPanel({
   const [draggingId, setDraggingId] = React.useState<string | null>(null);
   const [dropIndex, setDropIndex] = React.useState<number | null>(null);
   const selectedNameRef = React.useRef<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   React.useEffect(() => {
     selectedNameRef.current = selectedName;
@@ -401,11 +412,33 @@ export function RulesPanel({
       setCreateError("Use .list, .yaml, or .yml.");
       return;
     }
+    const targetUrl = `/api/rules/${encodeURIComponent(finalName)}`;
+    try {
+      const hasExisting = await isFileNonEmpty(targetUrl);
+      if (hasExisting) {
+        const ok = await confirm({
+          title: "Overwrite existing rule file?",
+          description:
+            `The file "${finalName}" already exists and is not empty.\n\n` +
+            "Continuing will overwrite it and cannot be undone.",
+          confirmLabel: "Overwrite file",
+          destructive: true,
+        });
+        if (!ok) {
+          return;
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Create failed";
+      setCreateError(message);
+      onStatus({ kind: "error", message });
+      return;
+    }
     setCreating(true);
     try {
       const payload = "";
       const response = await fetchJson<UpdateFileResponse>(
-        `/api/rules/${encodeURIComponent(finalName)}`,
+        targetUrl,
         {
           method: "PUT",
           body: JSON.stringify({ content: payload }),
@@ -427,7 +460,138 @@ export function RulesPanel({
     } finally {
       setCreating(false);
     }
-  }, [createName, loadList, onStatus, resetCreateForm]);
+  }, [confirm, createName, loadList, onStatus, resetCreateForm]);
+
+  const openRenameDialog = React.useCallback((item: FileEntry) => {
+    setRenameTarget(item);
+    setRenameName(item.name);
+    setRenameError(null);
+    setRenameOpen(true);
+  }, []);
+
+  const closeRenameDialog = React.useCallback(() => {
+    setRenameOpen(false);
+    setRenameTarget(null);
+    setRenameName("");
+    setRenameError(null);
+    setRenaming(false);
+  }, []);
+
+  const handleRenameOpenChange = React.useCallback(
+    (open: boolean) => {
+      if (open) {
+        setRenameOpen(true);
+        return;
+      }
+      closeRenameDialog();
+    },
+    [closeRenameDialog]
+  );
+
+  const submitRename = React.useCallback(async () => {
+    if (!renameTarget) {
+      return;
+    }
+    const trimmed = renameName.trim();
+    if (!trimmed) {
+      setRenameError("Enter a file name.");
+      return;
+    }
+    if (trimmed.includes("/") || trimmed.includes("\\")) {
+      setRenameError("Nested paths are not supported.");
+      return;
+    }
+    const currentExt = renameTarget.name.split(".").pop()?.toLowerCase() ?? "";
+    let finalName = trimmed;
+    const ext = trimmed.split(".").pop()?.toLowerCase() ?? "";
+    if (!ext || ext === trimmed) {
+      finalName = currentExt
+        ? `${trimmed}.${currentExt}`
+        : `${trimmed}.${DEFAULT_RULE_EXTENSION}`;
+    } else if (!RULE_FILE_EXTS.includes(ext)) {
+      setRenameError("Use .list, .yaml, or .yml.");
+      return;
+    }
+    if (finalName === renameTarget.name) {
+      closeRenameDialog();
+      return;
+    }
+    setRenaming(true);
+    try {
+      const response = await fetchJson<RenameFileResponse>(
+        `/api/rules/${encodeURIComponent(renameTarget.name)}/rename`,
+        {
+          method: "POST",
+          body: JSON.stringify({ name: finalName }),
+        }
+      );
+      if (renameTarget.name === selectedName) {
+        selectedNameRef.current = response.name;
+        await loadItem(response.name);
+        setSelectedPath(response.path);
+      }
+      onStatus({
+        kind: "ok",
+        message: `${renameTarget.name} renamed to ${response.name}`,
+      });
+      await loadList();
+      closeRenameDialog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Rename failed";
+      setRenameError(message);
+      onStatus({ kind: "error", message });
+    } finally {
+      setRenaming(false);
+    }
+  }, [
+    closeRenameDialog,
+    loadItem,
+    loadList,
+    onStatus,
+    renameName,
+    renameTarget,
+    selectedName,
+  ]);
+
+  const handleDelete = React.useCallback(
+    async (item: FileEntry) => {
+      const warning =
+        item.name === selectedName && dirty
+          ? `The file "${item.name}" has unsaved changes.\n\n` +
+            "Deleting will discard them and remove the file."
+          : `Delete "${item.name}"? This cannot be undone.`;
+      const ok = await confirm({
+        title: `Delete ${item.name}?`,
+        description: warning,
+        confirmLabel: "Delete file",
+        destructive: true,
+      });
+      if (!ok) {
+        return;
+      }
+      try {
+        await fetchJson<DeleteFileResponse>(
+          `/api/rules/${encodeURIComponent(item.name)}`,
+          { method: "DELETE" }
+        );
+        if (item.name === selectedName) {
+          selectedNameRef.current = null;
+          setSelectedName(null);
+          setSelectedPath(null);
+          setContent("");
+          setDirty(false);
+        }
+        onStatus({ kind: "ok", message: `${item.name} deleted` });
+        await loadList();
+      } catch (err) {
+        onStatus({
+          kind: "error",
+          message: err instanceof Error ? err.message : "Delete failed",
+        });
+      }
+    },
+    [confirm, dirty, loadList, onStatus, selectedName]
+  );
 
   const resetNewRuleForm = React.useCallback(() => {
     setNewRuleType(SUPPORTED_RULE_TYPES[0]);
@@ -545,9 +709,69 @@ export function RulesPanel({
     setDraggingId(null);
   }, []);
 
+  const renameHasUnsaved = renameTarget?.name === selectedName && dirty;
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-      <Card className="animate-[fade-in_0.5s_ease_forwards]">
+    <>
+      <Dialog open={renameOpen} onOpenChange={handleRenameOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename rule file</DialogTitle>
+            <DialogDescription>
+              Rename the file. Use .list, .yaml, or .yml.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="mt-4 space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitRename();
+            }}
+          >
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                File name
+              </p>
+              <Input
+                autoFocus
+                value={renameName}
+                onChange={(event) => {
+                  setRenameName(event.target.value);
+                  setRenameError(null);
+                }}
+                placeholder="rules.yaml"
+              />
+            </div>
+            {renameHasUnsaved && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                This file has unsaved changes. Renaming will discard them.
+              </div>
+            )}
+            {renameError && (
+              <p className="text-xs text-rose-500">{renameError}</p>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={closeRenameDialog}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={renaming}>
+                {renaming ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Pencil className="h-4 w-4" />
+                )}
+                Rename
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+        <Card className="animate-[fade-in_0.5s_ease_forwards]">
         <CardHeader>
           <CardTitle>Rules</CardTitle>
           <CardDescription>Rule files referenced by the rulesets.</CardDescription>
@@ -614,28 +838,52 @@ export function RulesPanel({
             {items.map((item) => {
               const isActive = item.name === selectedName;
               return (
-                <button
+                <div
                   key={item.name}
-                  onClick={() => void loadItem(item.name)}
                   className={cn(
-                    "flex w-full flex-col gap-2 rounded-2xl border px-4 py-3 text-left text-sm transition",
+                    "flex w-full items-start justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition",
                     isActive
                       ? "border-primary/60 bg-primary/10 text-foreground"
                       : "border-border/50 bg-background/60 hover:border-primary/40"
                   )}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{item.name}</span>
-                    {dirty && isActive && (
-                      <Badge variant="warning" className="shrink-0">
-                        Unsaved
-                      </Badge>
-                    )}
+                  <button
+                    type="button"
+                    onClick={() => void loadItem(item.name)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">{item.name}</span>
+                      {dirty && isActive && (
+                        <Badge variant="warning" className="shrink-0">
+                          Unsaved
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="mt-1 block truncate text-xs text-muted-foreground">
+                      {item.path}
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openRenameDialog(item)}
+                      aria-label={`Rename ${item.name}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-rose-600 hover:text-rose-600"
+                      onClick={() => void handleDelete(item)}
+                      aria-label={`Delete ${item.name}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {item.path}
-                  </span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -845,5 +1093,7 @@ export function RulesPanel({
         </CardContent>
       </Card>
     </div>
+    {ConfirmDialog}
+    </>
   );
 }

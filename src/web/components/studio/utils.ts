@@ -1,9 +1,32 @@
+import { fetchJson } from "@/components/studio/api";
+import type { FileContentResponse } from "@/components/studio/types";
+
 export function languageForFile(name: string): string {
   const lower = name.toLowerCase();
   if (lower.endsWith(".yaml") || lower.endsWith(".yml")) {
     return "yaml";
   }
+  if (lower.endsWith(".toml") || lower.endsWith(".cfg")) {
+    return "toml";
+  }
   return "plaintext";
+}
+
+export async function isFileNonEmpty(url: string): Promise<boolean> {
+  let existingContent: string | null = null;
+  try {
+    const existing = await fetchJson<FileContentResponse>(url);
+    existingContent = existing.content;
+  } catch (err) {
+    const statusCode =
+      typeof err === "object" && err && "status" in err
+        ? (err as { status?: number }).status
+        : undefined;
+    if (statusCode !== 404) {
+      throw err;
+    }
+  }
+  return Boolean(existingContent && existingContent.trim().length > 0);
 }
 
 export function formatDuration(seconds: number): string {

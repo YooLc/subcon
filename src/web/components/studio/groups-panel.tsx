@@ -22,6 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { fetchJson } from "@/components/studio/api";
+import { languageForFile } from "@/components/studio/utils";
 import type {
   FileContentResponse,
   GroupEntry,
@@ -29,6 +30,87 @@ import type {
   PanelProps,
   UpdateFileResponse,
 } from "@/components/studio/types";
+
+type TomlBlock = {
+  start: number;
+  end: number;
+  text: string;
+  key: string | null;
+};
+
+function extractTomlStringValue(block: string, key: string): string | null {
+  const re = new RegExp(
+    `^\\s*${key}\\s*=\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')`,
+    "m"
+  );
+  const match = block.match(re);
+  if (!match) {
+    return null;
+  }
+  const raw = match[1];
+  const quote = raw[0];
+  let value = raw.slice(1, -1);
+  if (quote === '"') {
+    value = value.replace(/\\\\/g, "\\").replace(/\\"/g, "\"");
+    value = value.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+  } else {
+    value = value.replace(/\\\\/g, "\\").replace(/\\'/g, "'");
+  }
+  return value;
+}
+
+function splitTomlBlocks(content: string, header: string, key: string): TomlBlock[] {
+  const pattern = new RegExp(
+    `^\\s*\\[\\[${header}\\]\\]\\s*(?:#.*)?$`,
+    "gm"
+  );
+  const matches = [...content.matchAll(pattern)];
+  if (matches.length === 0) {
+    return [];
+  }
+  return matches.map((match, index) => {
+    const start = match.index ?? 0;
+    const end =
+      index + 1 < matches.length
+        ? (matches[index + 1].index ?? content.length)
+        : content.length;
+    const text = content.slice(start, end);
+    return {
+      start,
+      end,
+      text,
+      key: extractTomlStringValue(text, key),
+    };
+  });
+}
+
+function findTomlBlock(
+  content: string,
+  header: string,
+  key: string,
+  target: string
+): TomlBlock | null {
+  const blocks = splitTomlBlocks(content, header, key);
+  return blocks.find((block) => block.key === target) ?? null;
+}
+
+function replaceTomlBlock(
+  content: string,
+  header: string,
+  key: string,
+  target: string,
+  nextText: string
+): string | null {
+  const blocks = splitTomlBlocks(content, header, key);
+  const match = blocks.find((block) => block.key === target);
+  if (!match) {
+    return null;
+  }
+  const trailing = match.text.match(/\s*$/)?.[0] ?? "";
+  const normalized = nextText.replace(/\s*$/, "");
+  const replacement = normalized + trailing;
+  return content.slice(0, match.start) + replacement + content.slice(match.end);
+}
 
 export function GroupsPanel({
   onStatus,
@@ -56,6 +138,16 @@ export function GroupsPanel({
     null
   );
   const [rulesetsSnippetSaving, setRulesetsSnippetSaving] = React.useState(false);
+  const [sectionEditorOpen, setSectionEditorOpen] = React.useState(false);
+  const [sectionEditorKind, setSectionEditorKind] = React.useState<
+    "groups" | "rulesets"
+  >("groups");
+  const [sectionEditorTarget, setSectionEditorTarget] = React.useState("");
+  const [sectionEditorContent, setSectionEditorContent] = React.useState("");
+  const [sectionEditorLoading, setSectionEditorLoading] = React.useState(false);
+  const [sectionEditorError, setSectionEditorError] = React.useState<string | null>(
+    null
+  );
   const groupsDirty =
     !!groupsSnippet && groupsContent !== groupsSnippet.content;
   const rulesetsDirty =
@@ -85,51 +177,58 @@ export function GroupsPanel({
     onDirtyChange?.(hasDirty);
   }, [hasDirty, onDirtyChange]);
 
-  const loadGroupsSnippet = React.useCallback(async () => {
+  const loadGroupsSnippet = React.useCallback(async (): Promise<FileContentResponse | null> => {
     setGroupsSnippetLoading(true);
     setGroupsSnippetError(null);
     try {
       const data = await fetchJson<FileContentResponse>("/api/snippets/groups");
       setGroupsSnippet(data);
       setGroupsContent(data.content);
+      return data;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load groups.toml";
       setGroupsSnippetError(message);
       onStatus({ kind: "error", message });
+      return null;
     } finally {
       setGroupsSnippetLoading(false);
     }
   }, [onStatus]);
 
-  const loadRulesetsSnippet = React.useCallback(async () => {
+  const loadRulesetsSnippet = React.useCallback(
+    async (): Promise<FileContentResponse | null> => {
     setRulesetsSnippetLoading(true);
     setRulesetsSnippetError(null);
     try {
       const data = await fetchJson<FileContentResponse>("/api/snippets/rulesets");
       setRulesetsSnippet(data);
       setRulesetsContent(data.content);
+      return data;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load rulesets.toml";
       setRulesetsSnippetError(message);
       onStatus({ kind: "error", message });
+      return null;
     } finally {
       setRulesetsSnippetLoading(false);
     }
   }, [onStatus]);
 
-  const saveGroupsSnippet = React.useCallback(async (): Promise<boolean> => {
+  const saveGroupsContent = React.useCallback(
+    async (nextContent: string, message: string): Promise<boolean> => {
     setGroupsSnippetSaving(true);
     try {
       await fetchJson<UpdateFileResponse>("/api/snippets/groups", {
         method: "PUT",
-        body: JSON.stringify({ content: groupsContent }),
+        body: JSON.stringify({ content: nextContent }),
       });
+      setGroupsContent(nextContent);
       setGroupsSnippet((prev) =>
-        prev ? { ...prev, content: groupsContent } : prev
+        prev ? { ...prev, content: nextContent } : prev
       );
-      onStatus({ kind: "ok", message: "groups.toml saved" });
+      onStatus({ kind: "ok", message });
       await loadGroups();
       return true;
     } catch (err) {
@@ -139,19 +238,21 @@ export function GroupsPanel({
     } finally {
       setGroupsSnippetSaving(false);
     }
-  }, [groupsContent, loadGroups, onStatus]);
+  }, [loadGroups, onStatus]);
 
-  const saveRulesetsSnippet = React.useCallback(async (): Promise<boolean> => {
+  const saveRulesetsContent = React.useCallback(
+    async (nextContent: string, message: string): Promise<boolean> => {
     setRulesetsSnippetSaving(true);
     try {
       await fetchJson<UpdateFileResponse>("/api/snippets/rulesets", {
         method: "PUT",
-        body: JSON.stringify({ content: rulesetsContent }),
+        body: JSON.stringify({ content: nextContent }),
       });
+      setRulesetsContent(nextContent);
       setRulesetsSnippet((prev) =>
-        prev ? { ...prev, content: rulesetsContent } : prev
+        prev ? { ...prev, content: nextContent } : prev
       );
-      onStatus({ kind: "ok", message: "rulesets.toml saved" });
+      onStatus({ kind: "ok", message });
       await loadGroups();
       return true;
     } catch (err) {
@@ -161,7 +262,129 @@ export function GroupsPanel({
     } finally {
       setRulesetsSnippetSaving(false);
     }
-  }, [loadGroups, onStatus, rulesetsContent]);
+  }, [loadGroups, onStatus]);
+
+  const saveGroupsSnippet = React.useCallback(
+    async (): Promise<boolean> => saveGroupsContent(groupsContent, "groups.toml saved"),
+    [groupsContent, saveGroupsContent]
+  );
+
+  const saveRulesetsSnippet = React.useCallback(
+    async (): Promise<boolean> =>
+      saveRulesetsContent(rulesetsContent, "rulesets.toml saved"),
+    [rulesetsContent, saveRulesetsContent]
+  );
+
+  const openSectionEditor = React.useCallback(
+    async (kind: "groups" | "rulesets", target: string) => {
+      setSectionEditorKind(kind);
+      setSectionEditorTarget(target);
+      setSectionEditorContent("");
+      setSectionEditorError(null);
+      setSectionEditorLoading(true);
+      setSectionEditorOpen(true);
+
+      let fileContent = kind === "groups" ? groupsContent : rulesetsContent;
+      if (!fileContent) {
+        const data =
+          kind === "groups" ? await loadGroupsSnippet() : await loadRulesetsSnippet();
+        fileContent = data?.content ?? "";
+      }
+
+      if (!fileContent) {
+        setSectionEditorError("Snippet not loaded.");
+        setSectionEditorLoading(false);
+        return;
+      }
+
+      const header = kind === "groups" ? "groups" : "rulesets";
+      const key = kind === "groups" ? "name" : "group";
+      const block = findTomlBlock(fileContent, header, key, target);
+      if (!block) {
+        setSectionEditorError(`Section not found for "${target}".`);
+        setSectionEditorLoading(false);
+        return;
+      }
+
+      setSectionEditorContent(block.text.trim());
+      setSectionEditorLoading(false);
+    },
+    [groupsContent, loadGroupsSnippet, loadRulesetsSnippet, rulesetsContent]
+  );
+
+  const saveSectionEditor = React.useCallback(async (): Promise<boolean> => {
+    const header = sectionEditorKind === "groups" ? "groups" : "rulesets";
+    const key = sectionEditorKind === "groups" ? "name" : "group";
+    const content = sectionEditorContent.trim();
+    if (!content) {
+      setSectionEditorError("Section is empty.");
+      return false;
+    }
+    if (!new RegExp(`^\\s*\\[\\[${header}\\]\\]\\s*(?:#.*)?$`, "m").test(content)) {
+      setSectionEditorError(`Section must include [[${header}]].`);
+      return false;
+    }
+    const updatedKey = extractTomlStringValue(content, key);
+    if (!updatedKey) {
+      setSectionEditorError(`Missing "${key}" in section.`);
+      return false;
+    }
+
+    const fileContent = sectionEditorKind === "groups" ? groupsContent : rulesetsContent;
+    if (!fileContent) {
+      setSectionEditorError("Snippet not loaded.");
+      return false;
+    }
+
+    const updated = replaceTomlBlock(
+      fileContent,
+      header,
+      key,
+      sectionEditorTarget,
+      content
+    );
+    if (!updated) {
+      setSectionEditorError("Section not found in file.");
+      return false;
+    }
+
+    const label =
+      sectionEditorKind === "groups"
+        ? `${updatedKey} group saved`
+        : `${updatedKey} rulesets saved`;
+    const ok =
+      sectionEditorKind === "groups"
+        ? await saveGroupsContent(updated, label)
+        : await saveRulesetsContent(updated, label);
+    if (ok) {
+      setSectionEditorOpen(false);
+    }
+    return ok;
+  }, [
+    groupsContent,
+    rulesetsContent,
+    saveGroupsContent,
+    saveRulesetsContent,
+    sectionEditorContent,
+    sectionEditorKind,
+    sectionEditorTarget,
+  ]);
+
+  const sectionEditorTitle =
+    sectionEditorKind === "groups"
+      ? `Edit group: ${sectionEditorTarget}`
+      : `Edit rulesets: ${sectionEditorTarget}`;
+  const sectionEditorDescription =
+    sectionEditorKind === "groups"
+      ? "Update a single [[groups]] block."
+      : "Update a single [[rulesets]] block.";
+  const sectionEditorPath =
+    sectionEditorKind === "groups" ? groupsSnippet?.path : rulesetsSnippet?.path;
+  const sectionEditorLanguage = languageForFile(
+    sectionEditorKind === "groups" ? "groups.toml" : "rulesets.toml"
+  );
+  const sectionEditorSaving =
+    sectionEditorKind === "groups" ? groupsSnippetSaving : rulesetsSnippetSaving;
 
   React.useEffect(() => {
     if (!onRegisterSave) {
@@ -206,6 +429,62 @@ export function GroupsPanel({
         <CardDescription>Proxy groups and their rulesets.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <Dialog
+          open={sectionEditorOpen}
+          onOpenChange={(open) => {
+            setSectionEditorOpen(open);
+            if (!open) {
+              setSectionEditorError(null);
+              setSectionEditorContent("");
+              setSectionEditorTarget("");
+              setSectionEditorLoading(false);
+            }
+          }}
+        >
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{sectionEditorTitle}</DialogTitle>
+              <DialogDescription>{sectionEditorDescription}</DialogDescription>
+            </DialogHeader>
+            <div className="mt-4 space-y-3">
+              {sectionEditorError && (
+                <p className="text-xs text-rose-500">{sectionEditorError}</p>
+              )}
+              {sectionEditorLoading ? (
+                <div className="rounded-2xl border border-dashed border-border/60 bg-muted/40 px-4 py-6 text-xs text-muted-foreground">
+                  Loading section...
+                </div>
+              ) : (
+                <CodeEditor
+                  value={sectionEditorContent}
+                  language={sectionEditorLanguage}
+                  height="320px"
+                  onChange={setSectionEditorContent}
+                  className="rounded-2xl border border-border/60 bg-muted/30"
+                />
+              )}
+              <Button
+                onClick={() => void saveSectionEditor()}
+                disabled={
+                  sectionEditorLoading ||
+                  sectionEditorSaving ||
+                  !sectionEditorContent.trim() ||
+                  !!sectionEditorError
+                }
+              >
+                {sectionEditorSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                Save section
+              </Button>
+              {sectionEditorPath && (
+                <p className="text-xs text-muted-foreground">{sectionEditorPath}</p>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">{groups.length} groups loaded</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -358,10 +637,30 @@ export function GroupsPanel({
                   {group.rules.length} rules
                 </Badge>
               </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openSectionEditor("groups", group.name)}
+                  disabled={groupsSnippetLoading || groupsSnippetSaving}
+                >
+                  <Code2 className="h-4 w-4" />
+                  Edit group
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openSectionEditor("rulesets", group.name)}
+                  disabled={rulesetsSnippetLoading || rulesetsSnippetSaving}
+                >
+                  <Code2 className="h-4 w-4" />
+                  Edit rulesets
+                </Button>
+              </div>
               <div className="mt-4 flex-1 min-h-0 text-xs text-muted-foreground">
                 <div className="grid h-full min-h-0 gap-4 md:grid-cols-2">
-                  <div className="flex min-h-0 flex-col rounded-2xl border border-border/40 bg-background/40 p-2">
-                    <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between bg-card/90 px-1 py-1 text-xs font-semibold text-muted-foreground backdrop-blur">
+                  <div className="flex min-h-0 flex-col rounded-3xl border border-border/40 bg-background/60 p-3 shadow-sm">
+                    <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between px-1 py-1 text-xs font-semibold text-muted-foreground">
                       <span>Matched proxies</span>
                       <Badge variant="outline">{group.proxies?.length ?? 0}</Badge>
                     </div>
@@ -383,8 +682,8 @@ export function GroupsPanel({
                       )}
                     </div>
                   </div>
-                  <div className="flex min-h-0 flex-col rounded-2xl border border-border/40 bg-background/40 p-2">
-                    <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between bg-card/90 px-1 py-1 text-xs font-semibold text-muted-foreground backdrop-blur">
+                  <div className="flex min-h-0 flex-col rounded-3xl border border-border/40 bg-background/60 p-3 shadow-sm">
+                    <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between px-1 py-1 text-xs font-semibold text-muted-foreground">
                       <span>Rulesets</span>
                       <Badge variant="outline">{group.rulesets.length}</Badge>
                     </div>

@@ -4,6 +4,15 @@ icon: lucide/list
 
 # Changelog
 
+## 0.6.0
+
+- Add: Web UI editor for `pref.toml` with save/revert and runtime reload.
+- Add: Rule base editors for Clash/Surge configs, plus matching API endpoints.
+- Add: Rule/profile file management (rename/delete, overwrite warnings) with animated dialogs.
+- Add: Groups and rulesets can be edited per-section from the Groups view.
+- Fix: New file creation no longer triggers "path outside allowed root".
+- Improve: TOML syntax highlighting for `.toml` and `.cfg` editors.
+
 ## 0.5.2
 
 - Fix: VLESS schema optional fields for `flow` and `servername`.

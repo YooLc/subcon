@@ -38,7 +38,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/components/studio/api";
-import { languageForFile } from "@/components/studio/utils";
+import { useConfirmDialog } from "@/components/studio/confirm-dialog";
+import { isFileNonEmpty, languageForFile } from "@/components/studio/utils";
 import type {
   FileContentResponse,
   FileEntry,
@@ -180,6 +181,7 @@ export function SchemaPanel({
   const [createError, setCreateError] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const selectedNameRef = React.useRef<string | null>(null);
+  const { confirm, ConfirmDialog } = useConfirmDialog();
 
   React.useEffect(() => {
     selectedNameRef.current = selectedName;
@@ -342,11 +344,33 @@ export function SchemaPanel({
       setCreateError("Use .yaml or .yml.");
       return;
     }
+    const targetUrl = `/api/schema/${encodeURI(finalName)}`;
+    try {
+      const hasExisting = await isFileNonEmpty(targetUrl);
+      if (hasExisting) {
+        const ok = await confirm({
+          title: "Overwrite existing schema?",
+          description:
+            `The file "${finalName}" already exists and is not empty.\n\n` +
+            "Continuing will overwrite it and cannot be undone.",
+          confirmLabel: "Overwrite schema",
+          destructive: true,
+        });
+        if (!ok) {
+          return;
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Create failed";
+      setCreateError(message);
+      onStatus({ kind: "error", message });
+      return;
+    }
     setCreating(true);
     try {
       const payload = DEFAULT_SCHEMA_CONTENT;
       const response = await fetchJson<UpdateFileResponse>(
-        `/api/schema/${encodeURI(finalName)}`,
+        targetUrl,
         {
           method: "PUT",
           body: JSON.stringify({ content: payload }),
@@ -370,7 +394,7 @@ export function SchemaPanel({
     } finally {
       setCreating(false);
     }
-  }, [createName, loadList, onStatus, resetCreateForm]);
+  }, [confirm, createName, loadList, onStatus, resetCreateForm]);
 
   const updateCell = React.useCallback(
     (targetName: string, fieldName: string, updater: (cell: SchemaCell) => SchemaCell) => {
@@ -430,8 +454,9 @@ export function SchemaPanel({
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-      <Card className="animate-[fade-in_0.5s_ease_forwards]">
+    <>
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+        <Card className="animate-[fade-in_0.5s_ease_forwards]">
         <CardHeader>
           <CardTitle>Protocols</CardTitle>
           <CardDescription>Schema protocols and targets.</CardDescription>
@@ -601,6 +626,8 @@ export function SchemaPanel({
         </CardContent>
       </Card>
     </div>
+    {ConfirmDialog}
+    </>
   );
 }
 

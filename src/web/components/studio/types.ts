@@ -51,6 +51,18 @@ export type UpdateFileResponse = {
   bytes: number;
 };
 
+export type RenameFileResponse = {
+  ok: boolean;
+  name: string;
+  path: string;
+};
+
+export type DeleteFileResponse = {
+  ok: boolean;
+  name: string;
+  path: string;
+};
+
 export type LogResponse = {
   items: string[];
 };

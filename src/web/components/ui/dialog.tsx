@@ -16,7 +16,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out",
+      "fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[state=open]:animate-[overlay-in_0.2s_ease-out] data-[state=closed]:animate-[overlay-out_0.15s_ease-in]",
       className
     )}
     {...props}
@@ -33,15 +33,17 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-border/60 bg-card/80 p-6 text-card-foreground shadow-xl backdrop-blur-xl",
+        "dialog-content fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
         className
       )}
       {...props}
     >
-      {children}
-      <DialogClose className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground transition hover:bg-muted/60 hover:text-foreground">
-        <X className="h-4 w-4" />
-      </DialogClose>
+      <div className="dialog-surface relative w-full rounded-3xl border border-border/60 bg-card/80 p-6 text-card-foreground shadow-xl backdrop-blur-xl">
+        {children}
+        <DialogClose className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground transition hover:bg-muted/60 hover:text-foreground">
+          <X className="h-4 w-4" />
+        </DialogClose>
+      </div>
     </DialogPrimitive.Content>
   </DialogPortal>
 ));

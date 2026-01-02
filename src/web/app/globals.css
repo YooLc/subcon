@@ -3,6 +3,9 @@
 :root {
   --background: #f6f7fb;
   --foreground: #1b1f2a;
+  --font-sora: "Sora", "Avenir Next", "Segoe UI", "Helvetica Neue", "Arial", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", "Menlo", "Monaco", "Consolas",
+    "Liberation Mono", "Courier New", monospace;
   --card: #ffffff;
   --card-foreground: #1b1f2a;
   --popover: #ffffff;
@@ -98,6 +101,54 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+.dialog-content[data-state="open"] .dialog-surface {
+  animation: dialog-in 0.22s ease-out;
+}
+
+.dialog-content[data-state="closed"] .dialog-surface {
+  animation: dialog-out 0.18s ease-in;
 }
 
 @keyframes drift {

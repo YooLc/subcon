@@ -11,7 +11,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
 use toml_edit::{Array, DocumentMut, Item, Value};
@@ -30,10 +30,14 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/ping", get(get_ping))
         .route("/config", get(get_config))
+        .route("/config/pref", put(update_pref))
+        .route("/config/rule-base/{target}", get(get_rule_base).put(update_rule_base))
         .route("/profiles", get(list_profiles))
-        .route("/profiles/{name}", get(get_profile).put(update_profile))
+        .route("/profiles/{name}", get(get_profile).put(update_profile).delete(delete_profile))
+        .route("/profiles/{name}/rename", post(rename_profile))
         .route("/rules", get(list_rules))
-        .route("/rules/{name}", get(get_rule).put(update_rule))
+        .route("/rules/{name}", get(get_rule).put(update_rule).delete(delete_rule))
+        .route("/rules/{name}/rename", post(rename_rule))
         .route("/schema", get(list_schema))
         .route("/schema/{*path}", get(get_schema).put(update_schema))
         .route("/logs", get(get_logs))
@@ -97,6 +101,11 @@ struct UpdateFileRequest {
 }
 
 #[derive(Deserialize)]
+struct RenameFileRequest {
+    name: String,
+}
+
+#[derive(Deserialize)]
 struct UpdateApiTokenRequest {
     token: String,
 }
@@ -117,6 +126,20 @@ struct UpdateFileResponse {
     ok: bool,
     path: String,
     bytes: usize,
+}
+
+#[derive(Serialize)]
+struct RenameFileResponse {
+    ok: bool,
+    name: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+struct DeleteFileResponse {
+    ok: bool,
+    name: String,
+    path: String,
 }
 
 #[derive(Serialize)]
@@ -331,6 +354,68 @@ async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigResponse
     }))
 }
 
+async fn update_pref(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateFileRequest>,
+) -> Result<Json<UpdateFileResponse>, ApiError> {
+    let path = &state.pref_path;
+    let previous = match fs::read_to_string(path).await {
+        Ok(text) => Some(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(ApiError::internal(err)),
+    };
+    let bytes = write_file(path, &body.content).await?;
+    let runtime = match build_runtime(path, &state.base_dir) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            if let Some(previous) = previous {
+                let _ = write_file(path, &previous).await;
+            } else {
+                let _ = fs::remove_file(path).await;
+            }
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, err.to_string()));
+        }
+    };
+    let mut guard = state.runtime.write().await;
+    *guard = runtime;
+    info!(path = %path.display(), bytes, "pref updated");
+    Ok(Json(UpdateFileResponse {
+        ok: true,
+        path: path.display().to_string(),
+        bytes,
+    }))
+}
+
+async fn get_rule_base(
+    State(state): State<AppState>,
+    AxumPath(target): AxumPath<String>,
+) -> Result<Json<FileContentResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_rule_base_path(&runtime.pref, &state.base_dir, &target)?;
+    let content = read_file(&file).await?;
+    Ok(Json(FileContentResponse {
+        name: target,
+        path: file.display().to_string(),
+        content,
+    }))
+}
+
+async fn update_rule_base(
+    State(state): State<AppState>,
+    AxumPath(target): AxumPath<String>,
+    Json(body): Json<UpdateFileRequest>,
+) -> Result<Json<UpdateFileResponse>, ApiError> {
+    let runtime = state.runtime.read().await.clone();
+    let file = resolve_rule_base_path(&runtime.pref, &state.base_dir, &target)?;
+    let bytes = write_file(&file, &body.content).await?;
+    info!(path = %file.display(), bytes, target = %target, "rule base updated");
+    Ok(Json(UpdateFileResponse {
+        ok: true,
+        path: file.display().to_string(),
+        bytes,
+    }))
+}
+
 async fn list_profiles(State(state): State<AppState>) -> Result<Json<FileListResponse>, ApiError> {
     let runtime = state.runtime.read().await.clone();
     let root = resolve_profiles_dir(&state.base_dir);
@@ -381,6 +466,39 @@ async fn update_profile(
     }))
 }
 
+async fn rename_profile(
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+    Json(body): Json<RenameFileRequest>,
+) -> Result<Json<RenameFileResponse>, ApiError> {
+    let root = resolve_profiles_dir(&state.base_dir);
+    let new_name = body.name.trim();
+    if new_name.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "name is empty"));
+    }
+    let file = rename_single_file(&root, &name, new_name, &["yaml", "yml"]).await?;
+    info!(path = %file.display(), from = %name, to = %new_name, "profile renamed");
+    Ok(Json(RenameFileResponse {
+        ok: true,
+        name: new_name.to_string(),
+        path: file.display().to_string(),
+    }))
+}
+
+async fn delete_profile(
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<Json<DeleteFileResponse>, ApiError> {
+    let root = resolve_profiles_dir(&state.base_dir);
+    let file = delete_single_file(&root, &name, &["yaml", "yml"]).await?;
+    info!(path = %file.display(), "profile deleted");
+    Ok(Json(DeleteFileResponse {
+        ok: true,
+        name,
+        path: file.display().to_string(),
+    }))
+}
+
 async fn list_rules(State(state): State<AppState>) -> Result<Json<FileListResponse>, ApiError> {
     let root = resolve_rules_dir(&state.base_dir);
     let entries = list_files_flat(&root, &["list", "yaml", "yml"]).await?;
@@ -414,6 +532,40 @@ async fn update_rule(
         ok: true,
         path: file.display().to_string(),
         bytes,
+    }))
+}
+
+async fn rename_rule(
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+    Json(body): Json<RenameFileRequest>,
+) -> Result<Json<RenameFileResponse>, ApiError> {
+    let root = resolve_rules_dir(&state.base_dir);
+    let new_name = body.name.trim();
+    if new_name.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "name is empty"));
+    }
+    let file =
+        rename_single_file(&root, &name, new_name, &["list", "yaml", "yml"]).await?;
+    info!(path = %file.display(), from = %name, to = %new_name, "rules file renamed");
+    Ok(Json(RenameFileResponse {
+        ok: true,
+        name: new_name.to_string(),
+        path: file.display().to_string(),
+    }))
+}
+
+async fn delete_rule(
+    State(state): State<AppState>,
+    AxumPath(name): AxumPath<String>,
+) -> Result<Json<DeleteFileResponse>, ApiError> {
+    let root = resolve_rules_dir(&state.base_dir);
+    let file = delete_single_file(&root, &name, &["list", "yaml", "yml"]).await?;
+    info!(path = %file.display(), "rules file deleted");
+    Ok(Json(DeleteFileResponse {
+        ok: true,
+        name,
+        path: file.display().to_string(),
     }))
 }
 
@@ -855,6 +1007,28 @@ fn resolve_rulesets_snippet_path(pref: &Pref, base_dir: &Path) -> Result<PathBuf
     Ok(resolve_path(base_dir, &entry.import))
 }
 
+fn resolve_rule_base_path(
+    pref: &Pref,
+    base_dir: &Path,
+    target: &str,
+) -> Result<PathBuf, ApiError> {
+    let raw = match target {
+        "clash" => pref.common.clash_rule_base.as_deref(),
+        "surge" => pref.common.surge_rule_base.as_deref(),
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("unsupported rule base {target}"),
+            ));
+        }
+    };
+    let raw = raw.ok_or_else(|| {
+        let key = format!("`common.{target}_rule_base`");
+        ApiError::new(StatusCode::BAD_REQUEST, format!("{key} not set in pref.toml"))
+    })?;
+    Ok(resolve_path(base_dir, raw))
+}
+
 fn system_path(path: &str) -> PathBuf {
     PathBuf::from("/etc/subcon").join(path)
 }
@@ -990,6 +1164,45 @@ fn resolve_nested_file(root: &Path, name: &str, exts: &[&str]) -> Result<PathBuf
     Ok(file)
 }
 
+async fn rename_single_file(
+    root: &Path,
+    from_name: &str,
+    to_name: &str,
+    exts: &[&str],
+) -> Result<PathBuf, ApiError> {
+    let from = resolve_single_file(root, from_name, exts)?;
+    if !from.is_file() {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "file not found"));
+    }
+    let to = resolve_single_file(root, to_name, exts)?;
+    if from == to {
+        return Ok(to);
+    }
+    if to.exists() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "target file already exists",
+        ));
+    }
+    fs::rename(&from, &to).await.map_err(ApiError::internal)?;
+    Ok(to)
+}
+
+async fn delete_single_file(
+    root: &Path,
+    name: &str,
+    exts: &[&str],
+) -> Result<PathBuf, ApiError> {
+    let file = resolve_single_file(root, name, exts)?;
+    match fs::remove_file(&file).await {
+        Ok(()) => Ok(file),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            Err(ApiError::new(StatusCode::NOT_FOUND, "file not found"))
+        }
+        Err(err) => Err(ApiError::internal(err)),
+    }
+}
+
 fn sanitize_single_path(name: &str) -> Result<PathBuf, ApiError> {
     let rel = sanitize_relative_path(name)?;
     if rel.components().count() != 1 {
@@ -1074,9 +1287,37 @@ fn ensure_within_root(root: &Path, path: &Path) -> Result<(), ApiError> {
     let root_norm = root
         .canonicalize()
         .unwrap_or_else(|_| root.to_path_buf());
-    let path_norm = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf());
+    let path_norm = match path.canonicalize() {
+        Ok(resolved) => resolved,
+        Err(_) => {
+            // Resolve against the deepest existing ancestor for new files.
+            let mut current = Some(path);
+            let mut resolved = None;
+            while let Some(candidate) = current {
+                match candidate.canonicalize() {
+                    Ok(candidate_norm) => {
+                        let rel = path.strip_prefix(candidate).unwrap_or(Path::new(""));
+                        resolved = Some(candidate_norm.join(rel));
+                        break;
+                    }
+                    Err(_) => {
+                        current = candidate.parent();
+                    }
+                }
+            }
+            resolved.unwrap_or_else(|| {
+                if path.is_relative() && root_norm.is_absolute() {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        root_norm.join(rel)
+                    } else {
+                        root_norm.join(path)
+                    }
+                } else {
+                    path.to_path_buf()
+                }
+            })
+        }
+    };
     if path_norm.starts_with(&root_norm) {
         Ok(())
     } else {
