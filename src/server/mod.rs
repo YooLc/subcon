@@ -9,7 +9,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{Query, State},
-    http::{Request, StatusCode, Uri},
+    http::{HeaderMap, HeaderName, HeaderValue, Request, StatusCode, Uri, header},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::get,
@@ -153,6 +153,19 @@ struct SubQuery {
 }
 
 const SUBSCRIPTION_USER_AGENTS: [&str; 2] = ["Clash/v1.18.0", "mihomo/1.19.17"];
+const SUBSCRIPTION_PASSTHROUGH_HEADERS: [&str; 6] = [
+    "profile-title",
+    "profile-update-interval",
+    "profile-web-page-url",
+    "subscription-refill-date",
+    "subscription-userinfo",
+    "support-url",
+];
+
+struct SubFetchResult {
+    proxies: Vec<crate::proxy::Proxy>,
+    forwarded_headers: Vec<(HeaderName, HeaderValue)>,
+}
 
 async fn handle_sub(
     State(state): State<AppState>,
@@ -184,7 +197,7 @@ async fn handle_sub(
         "handling /sub request"
     );
 
-    let proxies = load_proxies_for_request(
+    let sub_result = load_proxies_for_request(
         &runtime,
         &state.base_dir,
         params.url.as_deref(),
@@ -195,16 +208,23 @@ async fn handle_sub(
     let body = renderer.render(RenderArgs {
         runtime: &runtime,
         base_dir: &state.base_dir,
-        proxies,
+        proxies: sub_result.proxies,
         request_uri: Some(uri.to_string()),
     })?;
 
-    Ok((
+    let mut response = (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/yaml; charset=utf-8")],
+        [(header::CONTENT_TYPE, "text/yaml; charset=utf-8")],
         body,
     )
-        .into_response())
+        .into_response();
+    if !sub_result.forwarded_headers.is_empty() {
+        let headers = response.headers_mut();
+        for (name, value) in sub_result.forwarded_headers {
+            headers.append(name, value);
+        }
+    }
+    Ok(response)
 }
 
 async fn load_proxies_for_request(
@@ -212,19 +232,21 @@ async fn load_proxies_for_request(
     base_dir: &Path,
     url: Option<&str>,
     include_insert: bool,
-) -> Result<Vec<crate::proxy::Proxy>, ApiError> {
+) -> Result<SubFetchResult, ApiError> {
     let pref = &runtime.pref;
     let registry = &runtime.registry;
 
-    let mut proxies = if let Some(raw_url) = url {
+    let (mut proxies, forwarded_headers) = if let Some(raw_url) = url {
         let parsed_url = parse_subscription_url(raw_url)?;
-        fetch_proxies_from_url(&runtime.network, registry, &parsed_url).await?
+        let fetch = fetch_proxies_from_url(&runtime.network, registry, &parsed_url).await?;
+        (fetch.proxies, fetch.forwarded_headers)
     } else {
         let profiles =
             gather_profile_paths(pref, include_insert, base_dir).map_err(ApiError::internal)?;
-        proxy::load_from_paths(registry, profiles)
+        let proxies = proxy::load_from_paths(registry, profiles)
             .context("failed to load proxies from profiles")
-            .map_err(ApiError::internal)?
+            .map_err(ApiError::internal)?;
+        (proxies, Vec::new())
     };
 
     if url.is_some() && include_insert && pref.common.enable_insert {
@@ -244,7 +266,10 @@ async fn load_proxies_for_request(
         }
     }
 
-    Ok(proxies)
+    Ok(SubFetchResult {
+        proxies,
+        forwarded_headers,
+    })
 }
 
 fn parse_subscription_url(raw: &str) -> Result<reqwest::Url, ApiError> {
@@ -266,9 +291,9 @@ async fn fetch_proxies_from_url(
     network: &Network,
     registry: &SchemaRegistry,
     url: &reqwest::Url,
-) -> Result<Vec<crate::proxy::Proxy>, ApiError> {
-    network
-        .get_or_fetch_with(url, &SUBSCRIPTION_USER_AGENTS, false, |text| {
+) -> Result<SubFetchResult, ApiError> {
+    let result = network
+        .get_or_fetch_with_headers(url, &SUBSCRIPTION_USER_AGENTS, false, |text| {
             let proxies = proxy::load_from_text(registry, text)?;
             if proxies.is_empty() {
                 anyhow::bail!("no proxies found");
@@ -276,7 +301,23 @@ async fn fetch_proxies_from_url(
             Ok(proxies)
         })
         .await
-        .map_err(|err| ApiError::new(err.status, err.to_string()))
+        .map_err(|err| ApiError::new(err.status, err.to_string()))?;
+
+    Ok(SubFetchResult {
+        proxies: result.value,
+        forwarded_headers: collect_subscription_headers(&result.headers),
+    })
+}
+
+fn collect_subscription_headers(headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
+    let mut forwarded = Vec::new();
+    for key in SUBSCRIPTION_PASSTHROUGH_HEADERS {
+        let name = HeaderName::from_static(key);
+        for value in headers.get_all(&name).iter() {
+            forwarded.push((name.clone(), value.clone()));
+        }
+    }
+    forwarded
 }
 
 pub struct RenderArgs<'a> {

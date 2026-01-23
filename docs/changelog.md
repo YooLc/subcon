@@ -4,6 +4,10 @@ icon: lucide/list
 
 # Changelog
 
+## 0.6.1
+
+- Add: Forward subscription metadata headers from upstream `url` responses when present.
+
 ## 0.6.0
 
 - Add: Web UI editor for `pref.toml` with save/revert and runtime reload.

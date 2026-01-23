@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use reqwest::header::HeaderMap;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use tracing::info;
@@ -27,10 +28,17 @@ pub struct CacheSnapshot {
 }
 
 #[derive(Clone)]
+pub struct CacheData {
+    pub text: String,
+    pub headers: HeaderMap,
+}
+
+#[derive(Clone)]
 struct CacheEntry {
     expires_at: SystemTime,
     sha256: String,
     path: PathBuf,
+    headers: HeaderMap,
 }
 
 impl CacheStore {
@@ -50,7 +58,7 @@ impl CacheStore {
         })
     }
 
-    pub async fn read(&self, url: &str) -> Result<Option<String>> {
+    pub async fn read(&self, url: &str) -> Result<Option<CacheData>> {
         let entry = match self.get_valid_entry(url).await {
             Some(entry) => entry,
             None => return Ok(None),
@@ -85,10 +93,18 @@ impl CacheStore {
             .as_secs();
         info!(url, ttl_seconds = ttl_secs, "cache hit");
 
-        Ok(Some(text))
+        Ok(Some(CacheData {
+            text,
+            headers: entry.headers.clone(),
+        }))
     }
 
-    pub async fn store(&self, url: &reqwest::Url, text: &str) -> Result<()> {
+    pub async fn store(
+        &self,
+        url: &reqwest::Url,
+        text: &str,
+        headers: HeaderMap,
+    ) -> Result<()> {
         let bytes = text.as_bytes();
         let content_hash = sha256_hex(bytes);
         let path = self.cache_path_for_url(url);
@@ -105,6 +121,7 @@ impl CacheStore {
             expires_at: SystemTime::now() + self.ttl,
             sha256: content_hash,
             path,
+            headers,
         };
 
         let mut entries = self.entries.lock().await;

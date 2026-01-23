@@ -2,7 +2,7 @@ use std::{path::Path, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use axum::http::StatusCode;
-use reqwest::header::USER_AGENT;
+use reqwest::header::{HeaderMap, USER_AGENT};
 
 use crate::config::NetworkConfig;
 
@@ -19,6 +19,11 @@ pub struct Network {
     cache: CacheStore,
     security: Security,
     cache_enabled: bool,
+}
+
+pub struct FetchResult<T> {
+    pub value: T,
+    pub headers: HeaderMap,
 }
 
 impl Network {
@@ -54,9 +59,13 @@ impl Network {
         let should_store = self.cache_enabled;
 
         if use_cache {
-            if let Some(text) = self.cache.read(url.as_str()).await.map_err(NetworkError::internal)?
+            if let Some(entry) = self
+                .cache
+                .read(url.as_str())
+                .await
+                .map_err(NetworkError::internal)?
             {
-                return parse(&text).map_err(NetworkError::internal);
+                return parse(&entry.text).map_err(NetworkError::internal);
             }
         }
 
@@ -82,7 +91,7 @@ impl Network {
                 Ok(value) => {
                     if should_store {
                         self.cache
-                            .store(url, &text)
+                            .store(url, &text, HeaderMap::new())
                             .await
                             .map_err(NetworkError::internal)?;
                     }
@@ -103,7 +112,89 @@ impl Network {
         ))
     }
 
+    pub async fn get_or_fetch_with_headers<T, F>(
+        &self,
+        url: &reqwest::Url,
+        user_agents: &[&str],
+        no_cache: bool,
+        parse: F,
+    ) -> NetworkResult<FetchResult<T>>
+    where
+        F: Fn(&str) -> Result<T>,
+    {
+        self.security.validate_url(url)?;
+
+        let use_cache = self.cache_enabled && !no_cache;
+        let should_store = self.cache_enabled;
+
+        if use_cache {
+            if let Some(entry) = self
+                .cache
+                .read(url.as_str())
+                .await
+                .map_err(NetworkError::internal)?
+            {
+                let value = parse(&entry.text).map_err(NetworkError::internal)?;
+                return Ok(FetchResult {
+                    value,
+                    headers: entry.headers,
+                });
+            }
+        }
+
+        if user_agents.is_empty() {
+            return Err(NetworkError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "no user agents configured for network fetch",
+            ));
+        }
+
+        let mut last_error = None;
+
+        for ua in user_agents {
+            let (text, headers) = match self.fetch_text_with_headers(url, ua).await {
+                Ok(value) => value,
+                Err(err) => {
+                    last_error = Some(format!("request failed with UA {ua}: {err}"));
+                    continue;
+                }
+            };
+
+            match parse(&text) {
+                Ok(value) => {
+                    if should_store {
+                        self.cache
+                            .store(url, &text, headers.clone())
+                            .await
+                            .map_err(NetworkError::internal)?;
+                    }
+                    return Ok(FetchResult { value, headers });
+                }
+                Err(err) => {
+                    last_error = Some(format!("failed to parse response with UA {ua}: {err}"));
+                }
+            }
+        }
+
+        Err(NetworkError::new(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "failed to fetch subscription: {}",
+                last_error.unwrap_or_else(|| "unknown error".to_string())
+            ),
+        ))
+    }
+
     async fn fetch_text(&self, url: &reqwest::Url, user_agent: &str) -> Result<String> {
+        let (text, _) = self.fetch_text_with_headers(url, user_agent).await?;
+        Ok(text)
+    }
+
+    async fn fetch_text_with_headers(
+        &self,
+        url: &reqwest::Url,
+        user_agent: &str,
+    ) -> Result<(String, HeaderMap)> {
         let response = self
             .client
             .get(url.clone())
@@ -117,8 +208,9 @@ impl Network {
             bail!("status {status}");
         }
 
+        let headers = response.headers().clone();
         let text = response.text().await.context("failed to read response")?;
-        Ok(text)
+        Ok((text, headers))
     }
 
     pub async fn list_cache(&self) -> Vec<CacheSnapshot> {
