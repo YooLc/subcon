@@ -4,6 +4,10 @@ icon: lucide/list
 
 # Changelog
 
+## 0.6.2
+
+- Improve: Expand subscription fetch user agents for better compatibility.
+
 ## 0.6.1
 
 - Add: Forward subscription metadata headers from upstream `url` responses when present.

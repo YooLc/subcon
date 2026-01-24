@@ -152,7 +152,7 @@ struct SubQuery {
     url: Option<String>,
 }
 
-const SUBSCRIPTION_USER_AGENTS: [&str; 2] = ["Clash/v1.18.0", "mihomo/1.19.17"];
+const SUBSCRIPTION_USER_AGENTS: [&str; 3] = ["FlClash/v0.8.91", "clash-verge/v2.4.4", "mihomo/1.19.17"];
 const SUBSCRIPTION_PASSTHROUGH_HEADERS: [&str; 6] = [
     "profile-title",
     "profile-update-interval",
