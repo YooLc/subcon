@@ -1,0 +1,30 @@
+protocol: anytls
+includes:
+  - common
+  - tls
+fields:
+  password:
+    type: string
+  idle-session-check-interval:
+    type: integer
+  idle-session-timeout:
+    type: integer
+  min-idle-session:
+    type: integer
+targets:
+  clash:
+    template:
+      password:
+        from: password
+      idle-session-check-interval:
+        from: idle-session-check-interval
+        optional: true
+      idle-session-timeout:
+        from: idle-session-timeout
+        optional: true
+      min-idle-session:
+        from: min-idle-session
+        optional: true
+  surge:
+    not-implemented: true
+    template: {}

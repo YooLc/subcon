@@ -33,6 +33,7 @@ protocols include:
 - `shadowsocks`
 - `vmess`
 - `vless`
+- `anytls`
 - `wireguard`
 - `hysteria2`
 - `http`

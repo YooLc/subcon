@@ -4,6 +4,10 @@ icon: lucide/list
 
 # Changelog
 
+## 0.6.3
+
+- - Add: AnyTLS protocol schema.
+
 ## 0.6.2
 
 - Improve: Expand subscription fetch user agents for better compatibility.
