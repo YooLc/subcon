@@ -413,10 +413,12 @@ impl SchemaRegistry {
     fn register_builtin_default_exporters(&mut self) {
         self.register_default_exporter(Box::new(crate::export::clash::ClashExporter));
         self.register_default_exporter(Box::new(crate::export::surge::SurgeExporter));
+        self.register_default_exporter(Box::new(crate::export::uri::UriExporter));
     }
 
     fn register_builtin_parsers(&mut self) {
         self.register_parser(Box::new(crate::parser::clash::ClashParser));
+        self.register_parser(Box::new(crate::parser::uri::UriParser));
     }
 
     fn register_builtin_prologues(&mut self) {

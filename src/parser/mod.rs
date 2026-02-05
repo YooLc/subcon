@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 pub mod clash;
+pub mod uri;
 
 /// Parses a target-specific config format into a generic serde_json::Value.
 #[allow(dead_code)]

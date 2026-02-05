@@ -14,6 +14,7 @@ use axum::{
     routing::{get, post, put},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use toml_edit::{Array, DocumentMut, Item, Value};
 use tokio::fs;
 use tracing::{info, warn};
@@ -22,7 +23,7 @@ use crate::config::Pref;
 use crate::logging;
 use crate::paths::resolve_path;
 use crate::server::util::load_group_specs_from_pref;
-use crate::{groups, proxy};
+use crate::{groups, proxy, uri};
 
 use super::{ApiError, AppState, build_runtime};
 
@@ -35,6 +36,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/profiles", get(list_profiles))
         .route("/profiles/{name}", get(get_profile).put(update_profile).delete(delete_profile))
         .route("/profiles/{name}/rename", post(rename_profile))
+        .route("/profiles/import/uri", post(import_profiles_from_uri))
         .route("/rules", get(list_rules))
         .route("/rules/{name}", get(get_rule).put(update_rule).delete(delete_rule))
         .route("/rules/{name}/rename", post(rename_rule))
@@ -101,6 +103,11 @@ struct UpdateFileRequest {
 }
 
 #[derive(Deserialize)]
+struct ImportUriRequest {
+    content: String,
+}
+
+#[derive(Deserialize)]
 struct RenameFileRequest {
     name: String,
 }
@@ -126,6 +133,13 @@ struct UpdateFileResponse {
     ok: bool,
     path: String,
     bytes: usize,
+}
+
+#[derive(Serialize)]
+struct ImportUriResponse {
+    ok: bool,
+    count: usize,
+    proxies: Vec<JsonValue>,
 }
 
 #[derive(Serialize)]
@@ -463,6 +477,51 @@ async fn update_profile(
         ok: true,
         path: file.display().to_string(),
         bytes,
+    }))
+}
+
+async fn import_profiles_from_uri(
+    State(state): State<AppState>,
+    Json(body): Json<ImportUriRequest>,
+) -> Result<Json<ImportUriResponse>, ApiError> {
+    let input = body.content.trim();
+    if input.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "content is empty"));
+    }
+    if !uri::is_uri_input(input) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "input is not uri format",
+        ));
+    }
+
+    let runtime = state.runtime.read().await.clone();
+    let proxies = proxy::load_from_text(&runtime.registry, input)
+        .context("failed to parse uri input")
+        .map_err(ApiError::internal)?;
+    if proxies.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "no proxies found"));
+    }
+
+    let mut rendered = Vec::with_capacity(proxies.len());
+    for proxy in proxies {
+        let value = runtime
+            .registry
+            .convert(&proxy.protocol, "clash", &proxy.values)
+            .with_context(|| format!("failed to convert proxy {}", proxy.name))
+            .map_err(ApiError::internal)?;
+        let map = value
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("clash export must be a map"))
+            .map_err(ApiError::internal)?;
+        rendered.push(JsonValue::Object(map));
+    }
+
+    Ok(Json(ImportUriResponse {
+        ok: true,
+        count: rendered.len(),
+        proxies: rendered,
     }))
 }
 

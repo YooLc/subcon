@@ -12,7 +12,7 @@ Most behavior is driven by three layers: config, profiles, and schema.
 graph TD
   A[pref.toml] --> B[Profile paths]
   B --> C[Schema registry]
-  C --> D[Targets: Clash / Surge]
+  C --> D[Targets: Clash / Surge / URI]
 ```
 
 ## File map
@@ -40,5 +40,6 @@ On Debian packages, these directories are installed under `/etc/subcon`.
 ## Explore this section
 - [General Settings](general-settings.md)
 - [Proxy](proxy.md)
+- [URI Format](uri.md)
 - [Proxy Group](proxy-group.md)
 - [Rule](rule.md)

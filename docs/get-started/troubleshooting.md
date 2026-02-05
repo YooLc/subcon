@@ -15,7 +15,7 @@ icon: lucide/alert-triangle
 ## Request errors
 | Message | Cause | Fix |
 | --- | --- | --- |
-| `unsupported target` | Invalid `target` query | Use `clash` or `surge`. |
+| `unsupported target` | Invalid `target` query | Use `clash`, `surge`, or `uri`. |
 | `domain not allowed` | Host not in `network.allowed_domain` | Add the hostname. |
 | `allowed-domain list is empty` | `network.allowed_domain` is empty | Populate the allowlist. |
 | `failed to fetch subscription` | Remote fetch failed | Check URL, network, and format. |

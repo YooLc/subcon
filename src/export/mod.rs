@@ -7,6 +7,7 @@ use crate::schema::TargetSchema;
 
 pub mod clash;
 pub mod surge;
+pub mod uri;
 
 pub trait RenderPass: Send + Sync {
     fn render(

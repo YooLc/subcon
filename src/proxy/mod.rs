@@ -5,6 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::{Map as JsonMap, Value};
 
 use crate::schema::SchemaRegistry;
+use crate::uri;
 
 #[derive(Debug, Clone)]
 pub struct Proxy {
@@ -28,9 +29,10 @@ pub fn load_from_profile(registry: &SchemaRegistry, path: impl AsRef<Path>) -> R
 }
 
 pub fn load_from_text(registry: &SchemaRegistry, text: &str) -> Result<Vec<Proxy>> {
+    let target = if uri::is_uri_input(text) { "uri" } else { "clash" };
     let parsed = registry
-        .parse("clash", text)
-        .context("failed to parse clash profile")?;
+        .parse(target, text)
+        .with_context(|| format!("failed to parse {target} profile"))?;
     extract_proxies(&parsed)
 }
 

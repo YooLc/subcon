@@ -111,6 +111,7 @@ export function SubscriptionPanel({ config }: SubscriptionPanelProps) {
           >
             <option value="clash">clash</option>
             <option value="surge">surge</option>
+            <option value="uri">uri</option>
           </select>
         </div>
         <div className="space-y-2 lg:col-span-2">

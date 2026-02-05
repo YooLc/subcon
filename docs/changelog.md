@@ -4,6 +4,11 @@ icon: lucide/list
 
 # Changelog
 
+## 0.7.0
+
+- Add URI import/export target with query mapping. (experimental)
+- Add importing URI to profile in Web UI. (experimental)
+
 ## 0.6.3
 
 - - Add: AnyTLS protocol schema.

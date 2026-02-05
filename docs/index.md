@@ -6,9 +6,9 @@ icon: lucide/home
 
 ![Cover](https://socialify.git.ci/yoolc/subcon/image?custom_language=OpenAI&description=1&font=Inter&forks=1&issues=1&language=1&name=1&pattern=Plus&pulls=1&stargazers=1&theme=Auto)
 
-Subcon is a subscription converter server that renders Clash and Surge configs
-from local profiles or remote subscriptions. Conversion is driven by `schema/`
-and `conf/`, so you can tune behavior without recompiling.
+Subcon is a subscription converter server that renders Clash, Surge, and URI
+outputs from local profiles or remote subscriptions. Conversion is driven by
+`schema/` and `conf/`, so you can tune behavior without recompiling.
 
 !!! info "Why Subcon"
     - Schema-driven mapping keeps protocol support consistent.
@@ -29,7 +29,7 @@ graph LR
   A[Profiles or remote URL] --> B[Schema registry]
   B --> C[Optional inserts and node prefs]
   C --> D[Target renderer]
-  D --> E[Clash or Surge output]
+  D --> E[Clash / Surge / URI output]
 ```
 
 ## Support matrix
@@ -37,6 +37,7 @@ graph LR
 | --- | --- | --- | --- |
 | Clash | Yes | Yes | Import expects Clash profile YAML. |
 | Surge | No | Yes | VLESS not supported. |
+| URI | Yes | Yes | One URI per line. |
 
 ## Quick start
 === "Local profiles"
@@ -56,7 +57,7 @@ graph LR
 ## Request parameters
 | Name | Required | Description |
 | --- | --- | --- |
-| `target` | yes | `clash` or `surge`. |
+| `target` | yes | `clash`, `surge`, or `uri`. |
 | `url` | no | Remote subscription URL. |
 | `token` | no | Matches `common.api_access_token` to include inserts. |
 

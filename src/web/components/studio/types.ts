@@ -51,6 +51,12 @@ export type UpdateFileResponse = {
   bytes: number;
 };
 
+export type ImportUriResponse = {
+  ok: boolean;
+  count: number;
+  proxies: Record<string, unknown>[];
+};
+
 export type RenameFileResponse = {
   ok: boolean;
   name: string;

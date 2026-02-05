@@ -125,3 +125,5 @@ targets:
         from: udp
         optional: true
         default: false
+  uri:
+    template: {}

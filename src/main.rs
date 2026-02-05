@@ -2,6 +2,7 @@ mod export;
 mod groups;
 mod parser;
 mod schema;
+mod uri;
 mod proxy;
 mod rules;
 mod config;

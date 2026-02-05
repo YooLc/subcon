@@ -9,6 +9,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Download,
   RefreshCw,
   Save,
   Server,
@@ -49,6 +50,7 @@ import type {
   FileListResponse,
   GroupEntry,
   GroupResponse,
+  ImportUriResponse,
   PanelProps,
   ProfileState,
   ProxyField,
@@ -337,6 +339,10 @@ export function ProfilesPanel({
   const [schemaFieldLoading, setSchemaFieldLoading] = React.useState(false);
   const [newProxyMode, setNewProxyMode] = React.useState<"form" | "editor">("form");
   const [newProxyYaml, setNewProxyYaml] = React.useState("");
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [importText, setImportText] = React.useState("");
+  const [importError, setImportError] = React.useState<string | null>(null);
+  const [importing, setImporting] = React.useState(false);
   const selectedNameRef = React.useRef<string | null>(null);
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const groupTouchedRef = React.useRef(false);
@@ -864,6 +870,92 @@ export function ProfilesPanel({
     },
     [resetNewProxyForm]
   );
+
+  const handleImportOpenChange = React.useCallback((open: boolean) => {
+    setImportOpen(open);
+    if (!open) {
+      setImportText("");
+      setImportError(null);
+      setImporting(false);
+    }
+  }, []);
+
+  const applyImportedProxies = React.useCallback(
+    (baseYaml: string, imported: Record<string, unknown>[]) => {
+      const parsed = (YAML.parse(baseYaml) ?? {}) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Profile must be a YAML object.");
+      }
+      const existing = parsed.proxies;
+      let proxies: unknown[] = [];
+      if (Array.isArray(existing)) {
+        proxies = existing;
+      } else if (existing && typeof existing === "object") {
+        proxies = [existing];
+      }
+      parsed.proxies = [...proxies, ...imported];
+      return YAML.stringify(parsed, { indent: 2 });
+    },
+    []
+  );
+
+  const handleImport = React.useCallback(async () => {
+    if (!selectedName) {
+      setImportError("Select a profile first.");
+      return;
+    }
+    const input = importText.trim();
+    if (!input) {
+      setImportError("Paste one URI per line.");
+      return;
+    }
+    const baseYaml =
+      mode === "friendly" && profileState ? buildProfileYaml(profileState) : content;
+    if (!baseYaml.trim()) {
+      setImportError("Profile content is empty.");
+      return;
+    }
+
+    setImporting(true);
+    setImportError(null);
+    try {
+      const response = await fetchJson<ImportUriResponse>(
+        "/api/profiles/import/uri",
+        {
+          method: "POST",
+          body: JSON.stringify({ content: input }),
+        }
+      );
+      if (!response.proxies || response.proxies.length === 0) {
+        throw new Error("No proxies returned from import.");
+      }
+      const nextContent = applyImportedProxies(baseYaml, response.proxies);
+      setContent(nextContent);
+      setProfileState(parseProfile(nextContent));
+      setParseError(null);
+      setDirty(true);
+      setImportOpen(false);
+      setImportText("");
+      onStatus({
+        kind: "ok",
+        message: `Imported ${response.proxies.length} proxies into ${selectedName}.`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Import failed";
+      setImportError(message);
+      onStatus({ kind: "error", message });
+    } finally {
+      setImporting(false);
+    }
+  }, [
+    applyImportedProxies,
+    content,
+    importText,
+    mode,
+    onStatus,
+    profileState,
+    selectedName,
+  ]);
 
   React.useEffect(() => {
     if (!newProxyOpen || !newProxyType) {
@@ -1445,6 +1537,60 @@ export function ProfilesPanel({
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Dialog open={importOpen} onOpenChange={handleImportOpenChange}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!selectedName || loadingItem}
+                  >
+                    <Download className="h-4 w-4" />
+                    Import
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Import URI subscription</DialogTitle>
+                    <DialogDescription>
+                      Paste one proxy URI per line. Imported nodes will be
+                      appended to the current YAML as Clash proxies.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-4 space-y-3">
+                    <CodeEditor
+                      value={importText}
+                      language="plaintext"
+                      height="240px"
+                      onChange={(value) => {
+                        setImportText(value);
+                        setImportError(null);
+                      }}
+                      className="rounded-2xl border border-border/60 bg-muted/30"
+                    />
+                    {importError && (
+                      <p className="text-xs text-rose-500">{importError}</p>
+                    )}
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => handleImportOpenChange(false)}
+                        disabled={importing}
+                      >
+                        Cancel
+                      </Button>
+                      <Button onClick={() => void handleImport()} disabled={importing}>
+                        {importing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                        Import
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <Dialog open={newProxyOpen} onOpenChange={handleNewProxyOpenChange}>
                 <DialogTrigger asChild>
                   <Button

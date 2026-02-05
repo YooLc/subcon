@@ -25,6 +25,12 @@ proxies:
     Local profiles are loaded from `common.default_url` when `url` is not
     supplied in the request.
 
+## URI profiles
+URI profiles contain one proxy URI per line. They can be used for remote
+subscriptions or as local files in `common.default_url`.
+
+See [URI Format](uri.md) for the supported syntax and query mapping.
+
 ## Supported protocols
 Schema files in `schema/` define which protocols are supported. Typical
 protocols include:

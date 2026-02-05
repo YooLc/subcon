@@ -29,6 +29,7 @@ use crate::server::util::{gather_insert_paths, gather_profile_paths};
 mod api;
 mod clash;
 mod surge;
+mod uri;
 mod util;
 mod web;
 
@@ -51,6 +52,7 @@ pub async fn run() -> Result<()> {
     let mut targets: HashMap<String, Arc<dyn TargetRenderer>> = HashMap::new();
     targets.insert("clash".to_string(), Arc::new(clash::ClashRenderer));
     targets.insert("surge".to_string(), Arc::new(surge::SurgeRenderer));
+    targets.insert("uri".to_string(), Arc::new(uri::UriRenderer));
 
     let runtime = build_runtime(&pref_path, &base_dir)?;
 
